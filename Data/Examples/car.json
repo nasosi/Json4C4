@@ -1,0 +1,13 @@
+{
+  "make": "Colorado",
+  "model": "M3000",
+  "rgbColor": [ 0.3, 0.1, 0.6 ],
+  "length": 4702,
+  "width": 2032,
+  "mechanical": {
+    "horsepower": 2450,
+    "gearRatios": [ 3.2, 2.5, 1.7, 1.2, 0.6 ],
+    "automatic": true
+  },
+  "price$": 2.2250738585072014e-308
+}

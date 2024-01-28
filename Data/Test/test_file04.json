@@ -1,0 +1,8 @@
+{
+    "version": "1.0.1",
+    "stringMap": {
+        "str1": "str1v",
+        "str2": "str2v",
+        "str3": "str3v"
+    }
+}

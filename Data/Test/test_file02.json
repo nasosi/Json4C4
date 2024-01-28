@@ -1,0 +1,22 @@
+{
+    "double": 2.45e-2,
+    "doubleArray": [ 3, 4, 5, 1.65e17, -2.35e-20, 1.9643e-11 ],
+    "stringArray": [ "str1", "str2", "str3", "str4" ],
+    "object": {
+        "bool": false,
+        "objectArray": [
+            {
+                "double": 3.46,
+                "string": "str5"
+            },
+            {
+                "double": 2.46,
+                "string": "str6"
+            },
+            {
+                "double": -2.46,
+                "string": "str7"
+            }
+        ]
+    }
+}
