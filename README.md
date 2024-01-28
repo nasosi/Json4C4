@@ -106,7 +106,7 @@ GIT_REPOSITORY "C:/users/joe/codes/Json4C4"
 ```
 ## Using in projects that do not utilize Terathon data structures
 ### ```std::``` data structures
-Json4C4 supports ```std::string``` and ```std::vector``` by default in the standalone compilation mode (when ```TERATHON_NO_SYSTEM``` is not defined). If you want to disable these ```std``` data structures, you have two options:
+Json4C4 supports ```std::string```, ```std::vector```, and ```std::map``` by default in the standalone compilation mode (when ```TERATHON_NO_SYSTEM``` is not defined). If you want to disable these ```std``` data structures, you have two options:
 * If using cmake, compile Json4C4 with the ```Json4C4EnableStdSupport``` cmake argument set to ```No```.
 * If not using cmake, define ```JSON4C4_DISABLE_STD_SUPPORT``` for compiling ```Json4C4.cpp``` or including ```Json4C4.hpp```.
 
