@@ -26,7 +26,7 @@
 // This software uses third party libraries. Their licenses can be found in the
 // "Licenses" subfolder of the source code repository.
 
-// RFC 8259 (STD90) Compliant JSON parser for the C4 Engine
+// RFC 8259 (STD90) Compliant JSON library for the C4 Engine
 
 #ifndef C4Json_h
 #define C4Json_h
