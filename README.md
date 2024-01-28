@@ -96,7 +96,7 @@ add_executable( exampleTarget main.cpp )
 
 target_link_libraries( exampleTarget PRIVATE Json4C4::Json4C4 )
 ```
-A prepared example is in ```Example07_cmake_fetchcontent```.
+An  example can be found in ```Code/Examples/Example07_cmake_fetchcontent```.
 
 If you prefer to have a local copy, you can alternatively clone Json4C4 and use the local directory instead of the GitHub URL. For example:
 ```cmake
