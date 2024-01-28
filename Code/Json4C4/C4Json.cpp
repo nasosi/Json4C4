@@ -564,12 +564,17 @@ namespace C4
             }
 
             char* str = new char[ ( *textLength ) + 1 ];
+
 #    ifdef _MSC_VER
+
             strncpy_s( str, ( *textLength ) + 1, text, ( *textLength ) );
 
 #    else
+
             strncpy( str, text, ( *textLength ) );
+
 #    endif
+
             str[ *textLength ] = 0;
 
             char*  end = nullptr;
