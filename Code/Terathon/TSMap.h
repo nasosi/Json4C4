@@ -67,6 +67,7 @@ namespace Terathon
 				leftSubnode = nullptr;
 				rightSubnode = nullptr;
 				owningMap = nullptr;
+                balance = 0;
 			}
 
 			TERATHON_API virtual ~MapElementBase();

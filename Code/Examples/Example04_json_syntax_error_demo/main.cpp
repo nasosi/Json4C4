@@ -39,8 +39,8 @@ namespace TS   = Terathon;
 struct TextBox
 {
     TS::String<> text;
-    double       width;
-    double       height;
+    double       width = 0;
+    double       height = 0;
 };
 
 // Define process rules for deserialization / serialization / validation. A none macro is found in Example03_no_macros

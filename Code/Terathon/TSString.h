@@ -406,7 +406,7 @@ namespace Terathon
 			int32		logicalSize;
 			int32		physicalSize;
 			char		*stringPointer;
-			char		localString[kStringLocalSize];
+            char        localString[ kStringLocalSize ] = "000000000000000";
 
 			TERATHON_API String(const char *s1, const char *s2);
 			TERATHON_API String(int32 n, const char *s1);
@@ -423,7 +423,7 @@ namespace Terathon
 			TERATHON_API ~String();
 
 			TERATHON_API String(const String& s);
-			TERATHON_API String(String&& s);
+			TERATHON_API String(String&& s) noexcept;
 			TERATHON_API String(const char *s);
 			TERATHON_API String(const char *s, int32 length);
 			TERATHON_API String(const uint16 *s);
@@ -510,7 +510,7 @@ namespace Terathon
 			TERATHON_API void PurgeString(void);
 			TERATHON_API String& Set(const char *s, int32 length);
 
-			TERATHON_API String& operator =(String&& s);
+			TERATHON_API String& operator=( String&& s ) noexcept;
 			TERATHON_API String& operator =(const String& s);
 			TERATHON_API String& operator =(const char *s);
 			TERATHON_API String& operator =(int32 n);

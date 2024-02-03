@@ -52,7 +52,7 @@ String<0>::String(const String& s)
 	}
 }
 
-String<0>::String(String&& s)
+String<0>::String(String&& s) noexcept
 {
 	logicalSize = s.logicalSize;
 	physicalSize = s.physicalSize;
@@ -92,10 +92,23 @@ String<0>::String(const char *s)
 		stringPointer = localString;
 	}
 
+#if defined( _MSC_VER )
+
+#    pragma warning( push )
+#    pragma warning( disable : 6386 ) // Buffer overrun while writing to 'stringPointer'
+
+#endif
+
 	for (machine a = 0; a < size; a++)
 	{
 		stringPointer[a] = s[a];
 	}
+
+#if defined( _MSC_VER )
+
+#    pragma warning( pop )
+
+#endif
 }
 
 String<0>::String(const char *s, int32 length)
@@ -123,11 +136,24 @@ String<0>::String(const char *s, int32 length)
 		stringPointer = localString;
 	}
 
+#if defined( _MSC_VER )
+
+#    pragma warning( push )
+#    pragma warning( disable : 6386 ) // Buffer overrun while writing to 'stringPointer'
+
+#endif
+
 	stringPointer[length] = 0;
 	for (machine a = 0; a < length; a++)
 	{
 		stringPointer[a] = s[a];
 	}
+
+#if defined( _MSC_VER )
+
+#    pragma warning( pop )
+
+#endif
 }
 
 String<0>::String(const uint16 *s)
@@ -318,7 +344,7 @@ String<0>& String<0>::Set(const char *s, int32 length)
 	return (*this);
 }
 
-String<0>& String<0>::operator =(String&& s)
+String<0>& String<0>::operator =(String&& s) noexcept
 {
 	if (stringPointer != localString)
 	{
@@ -572,6 +598,13 @@ String<0>& String<0>::operator +=(uint64 n)
 
 String<0>& String<0>::SetStringLength(int32 length)
 {
+#if defined( _MSC_VER )
+
+#    pragma warning( push )
+#    pragma warning( disable : 6386 ) // Buffer overrun while writing to 'stringPointer'
+
+#endif
+
 	if (length > 0)
 	{
 		int32 size = length + 1;
@@ -611,6 +644,11 @@ String<0>& String<0>::SetStringLength(int32 length)
 		PurgeString();
 	}
 
+#if defined( _MSC_VER )
+
+#    pragma warning( pop )
+
+#endif
 	return (*this);
 }
 
