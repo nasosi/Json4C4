@@ -897,8 +897,6 @@ namespace C4
                             return status;
                         }
 
-                        valueData->AppendArrayElement( value );
-
                         if constexpr ( Detail::HasSerializeMember<T>::Value )
                         {
                             status = element.Serialize( value );
@@ -913,6 +911,8 @@ namespace C4
                             delete value;
                             return status;
                         }
+
+                        valueData->AppendArrayElement( value );
                     }
 
                     return Status::kOk;
