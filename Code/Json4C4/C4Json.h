@@ -128,6 +128,7 @@ namespace C4
             kOk = 0,
             KFileOpenError,
             KFileReadError,
+            KFileTooLarge,
             kTextBufferContentsInvalid,
             kUnterminatedTextBuffer,
             kExpectedOpeningCurlyBraces,

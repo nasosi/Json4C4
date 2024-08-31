@@ -44,6 +44,8 @@
 
 #define JSON4C4VERSION STR( JSON4C4VERSIONMAJOR ) "." STR( JSON4C4VERSIONMINOR ) "." STR( JSON4C4VERSIONPATCH )
 
+#define MAX_FILE_SIZE 0xffff - 1
+
 #ifndef TERATHON_NO_SYSTEM
 
 #    ifndef JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS
@@ -1493,6 +1495,11 @@ namespace C4
             }
 
             Terathon::uint64 fileSize = file.GetFileSize();
+
+            if ( fileSize > MAX_FILE_SIZE )
+            {
+                return ParseResult { Status::KFileTooLarge, 0, 0 };
+            }
 
             Array<char> nullTerminatedText;
 
