@@ -121,6 +121,11 @@ namespace C4
             struct IsSame<T, T> : TrueType
             {
             };
+
+            struct Optional
+            {
+            };
+
         } // namespace Detail
 
         enum class Status : unsigned int
@@ -162,6 +167,8 @@ namespace C4
             int32  errorLine   = 0;
             int32  errorColumn = 0;
         };
+
+        inline const Detail::Optional optional = Detail::Optional {};
 
         template <class Func>
         Status MayThrow( Func&& func ) noexcept
@@ -407,8 +414,8 @@ namespace C4
             struct NoneSuch
             {
                 ~NoneSuch()                       = delete;
-                NoneSuch( NoneSuch const& )       = delete;
-                void operator=( NoneSuch const& ) = delete;
+                NoneSuch( const NoneSuch& )       = delete;
+                void operator=( const NoneSuch& ) = delete;
             };
 
             template <class Default, class AlwaysVoid, template <class...> class Op, class... Args>
@@ -1387,6 +1394,19 @@ namespace C4
             return ValidateProto( value, Detail::Forward<Args>( args )... );
         }
 
+        template <class T, class... Args>
+        Status ValidateProto( const Value* value, Detail::Optional, const char* name, const T& data, Args&&... args ) noexcept
+        {
+            Status status = Validate( value, name, data );
+
+            if ( status != Status::kOk && status != Status::kNameNotPresent )
+            {
+                return status;
+            }
+
+            return ValidateProto( value, Detail::Forward<Args>( args )... );
+        }
+
         inline Status DeserializeProto( const Value* ) noexcept
         {
             return Status::kOk;
@@ -1418,6 +1438,19 @@ namespace C4
             return DeserializeProto( value, Detail::Forward<Args>( args )... );
         }
 
+        template <class T, class... Args>
+        Status DeserializeProto( const Value* value, Detail::Optional, const char* name, T& data, Args&&... args ) noexcept
+        {
+            Status status = Deserialize( value, name, data );
+
+            if ( status != Status::kOk && status != Status::kNameNotPresent )
+            {
+                return status;
+            }
+
+            return DeserializeProto( value, Detail::Forward<Args>( args )... );
+        }
+
         inline Status SerializeProto( Value* ) noexcept
         {
             return Status::kOk;
@@ -1425,6 +1458,19 @@ namespace C4
 
         template <class T, class... Args>
         Status SerializeProto( Value* value, const char* name, const T& data, Args&&... args ) noexcept
+        {
+            Status status = Serialize( value, name, data );
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            return SerializeProto( value, Detail::Forward<Args>( args )... );
+        }
+
+        template <class T, class... Args>
+        Status SerializeProto( Value* value, Detail::Optional, const char* name, const T& data, Args&&... args ) noexcept
         {
             Status status = Serialize( value, name, data );
 
