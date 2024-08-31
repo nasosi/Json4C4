@@ -168,7 +168,7 @@ namespace C4
             int32  errorColumn = 0;
         };
 
-        inline const Detail::Optional optional = Detail::Optional {};
+        inline const Detail::Optional optional;
 
         template <class Func>
         Status MayThrow( Func&& func ) noexcept
