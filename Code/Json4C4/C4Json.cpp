@@ -1168,7 +1168,13 @@ namespace C4
             return Status::kOk;
         }
 
-        ArrayValue::~ArrayValue() {};
+        ArrayValue::~ArrayValue()
+        {
+            for ( auto pointer : data )
+            {
+                delete pointer;
+            }
+        };
 
         Array<Value*>* ArrayValue::GetJsonValueArrayData() noexcept
         {
