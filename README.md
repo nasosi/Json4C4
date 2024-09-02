@@ -70,6 +70,14 @@ printf("TextBox text: %s. Width: %f, height: %f\n", static_cast<const char*>(tex
 ```
 If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
+### Optional arguments (added in version 1.1.0)
+For optional arguments, you can use the keyword optional to designate them as such before the field name. For example:
+```cxx
+#define TEXTBOX_PROTO \
+    "text", object.text,\
+    "width", object.width,\
+    Json::optional, "height", object.height
+```
 ## Integrating into the C4 Engine Visual Studio solution
 First, copy the ```Json4C4.h```and ```Json4C4.cpp``` files from the ```Code/Json4C4``` subfolder into the C4 Engine ```EngineCode``` directory. Subsequently, add the two files to the ```Engine``` project by right-clicking on the ```System``` filter under the ```Engine``` project in the ```Solution Explorer``` and selecting ```Add->Existing Item```.
 
