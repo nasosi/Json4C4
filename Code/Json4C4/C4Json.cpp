@@ -37,7 +37,7 @@
 
 #define JSON4C4VERSIONMAJOR 1
 #define JSON4C4VERSIONMINOR 1
-#define JSON4C4VERSIONPATCH 0
+#define JSON4C4VERSIONPATCH 1
 
 #define STRN( s ) #s
 #define STR( s ) STRN( s )
