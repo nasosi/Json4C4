@@ -56,19 +56,19 @@ int main()
 
     if (rootObject.d != 2.45e-2)
     {
-        fprintf(stderr, "trootObject.d not parsed correclty");
+        fprintf(stderr, "trootObject.d not parsed correctly");
         return 1;
     }
 
     if (rootObject.doubleArray[5] != 1.9643e-11)
     {
-        fprintf(stderr, "trootObject.d not parsed correclty");
+        fprintf(stderr, "trootObject.d not parsed correctly");
         return 1;
     }
 
     if (rootObject.object.objectInObjectArrayArray[2].string != "str7")
     {
-        fprintf(stderr, "trootObject.d not parsed correclty");
+        fprintf(stderr, "trootObject.d not parsed correctly");
         return 1;
     }
 
