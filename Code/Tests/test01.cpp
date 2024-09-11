@@ -40,25 +40,25 @@ int main()
 
     if (testFile01.str1 != "str1Value")
     {
-        fprintf(stderr, "testFile01.str1 not parsed correclty");
+        fprintf(stderr, "testFile01.str1 not parsed correctly");
         return 1;
     }
 
     if (testFile01.str2 != "str2Value")
     {
-        fprintf(stderr, "testFile01.str2 not parsed correclty");
+        fprintf(stderr, "testFile01.str2 not parsed correctly");
         return 1;
     }
 
     if (testFile01.d != 2.36531e-7)
     {
-        fprintf(stderr, "testFile01.d not parsed correclty");
+        fprintf(stderr, "testFile01.d not parsed correctly");
         return 1;
     }
 
     if (testFile01.b != true)
     {
-        fprintf(stderr, "testFile01.b not parsed correclty");
+        fprintf(stderr, "testFile01.b not parsed correctly");
         return 1;
     }
 
