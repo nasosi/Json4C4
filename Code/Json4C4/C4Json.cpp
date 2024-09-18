@@ -98,6 +98,8 @@ namespace C4
 
 #ifndef C4_ENGINE_MODULE
 
+#    if defined JSON4C4_WINDOWS
+
     class WCharBuffer
     {
     private:
@@ -173,6 +175,8 @@ namespace C4
             return string;
         }
     };
+
+#    endif
 
     enum FileOpenMode
     {
