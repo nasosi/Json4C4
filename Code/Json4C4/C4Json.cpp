@@ -29,6 +29,20 @@
 #include "C4Json.h"
 #include "TSText.h"
 
+#if defined( WIN32 ) || defined( _WIN32 ) || defined( __WIN32__ ) || defined( __NT__ )
+#
+#    define JSON4C4_WINDOWS
+#
+#elif __linux__
+#
+#    define JSON4C4_LINUX
+#
+#else
+#
+#    error "Unsupported Operating System"
+#
+#endif
+
 #if defined( _MSC_VER )
 
 #    pragma warning( disable : 4530 ) // C++ exception handler used, but unwind semantics are not enabled
@@ -60,9 +74,15 @@
 
 #    include "C4Files.h"
 
-#else
+#elif defined JSON4C4_LINUX
 
 #    include <fstream>
+
+#endif
+
+#ifdef JSON4C4_WINDOWS
+
+#    include "windows.h"
 
 #endif
 
@@ -77,6 +97,82 @@ namespace C4
 {
 
 #ifndef C4_ENGINE_MODULE
+
+    class WCharBuffer
+    {
+    private:
+        wchar_t* buffer = nullptr;
+
+    public:
+        WCharBuffer( Terathon::uint32 maxLength )
+        {
+            wchar_t* c = buffer = new wchar_t[ maxLength + 1 ];
+            wchar_t* end        = buffer + maxLength;
+
+            while ( c != end )
+            {
+                *( c++ ) = 0;
+            }
+
+            *end = 0;
+        }
+
+        WCharBuffer( const wchar_t* str, Terathon::uint32 maxLength )
+        {
+            wchar_t* c = buffer = new wchar_t[ maxLength + 1 ];
+            wchar_t* end        = buffer + maxLength;
+
+            while ( *str != L'\0' && c != end )
+            {
+                *( c++ ) = *( str++ );
+            }
+
+            *c   = 0;
+            *end = 0;
+        }
+
+        WCharBuffer( const Terathon::String<>& str )
+        {
+            using namespace Terathon;
+
+            int32 length = Text::GetWideTextCharCount( str );
+            buffer       = new wchar_t[ length + 1 ];
+
+            Text::ConvertStringToWideText( str, reinterpret_cast<uint16*>( buffer ), length );
+        }
+
+        ~WCharBuffer()
+        {
+            if ( buffer != nullptr )
+            {
+                delete[] buffer;
+            }
+        }
+
+        operator WCHAR*()
+        {
+            return buffer;
+        }
+
+        operator const WCHAR*() const
+        {
+            return buffer;
+        }
+
+        operator Terathon::String<>()
+        {
+            using namespace Terathon;
+
+            int32 charArrayLength = Text::GetUnicodeStringLength( reinterpret_cast<uint16*>( buffer ) );
+
+            String<> string;
+            string.SetStringLength( charArrayLength );
+
+            Text::ConvertWideTextToString( reinterpret_cast<uint16*>( buffer ), string, charArrayLength );
+
+            return string;
+        }
+    };
 
     enum FileOpenMode
     {
@@ -96,13 +192,60 @@ namespace C4
     class File
     {
     private:
+        bool IsReadOnly = false;
+
+#    if defined JSON4C4_WINDOWS
+
+        HANDLE fileHandle = nullptr;
+
+#    elif defined JSON4C4_LINUX
+
         std::fstream fileStream;
-        bool         IsReadOnly = false;
+
+#    endif
 
     public:
+        ~File()
+        {
+            CloseFile();
+        }
+
         FileStatus OpenFile( const char* fileName, FileOpenMode fileOpenMode )
         {
             CloseFile();
+
+#    if defined JSON4C4_WINDOWS
+
+            const WCharBuffer wideFileName( Terathon::String<> { fileName } );
+
+            if ( fileOpenMode == kFileReadOnly )
+            {
+                HANDLE handle = CreateFileW( wideFileName, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
+
+                if ( handle == INVALID_HANDLE_VALUE )
+                {
+                    return kFileOpenFailed;
+                }
+
+                this->fileHandle = handle;
+                this->IsReadOnly = true;
+
+                return kFileOkay;
+            }
+
+            HANDLE handle = CreateFileW( wideFileName, GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr );
+
+            if ( handle == INVALID_HANDLE_VALUE )
+            {
+                return kFileOpenFailed;
+            }
+
+            this->fileHandle = handle;
+            this->IsReadOnly = false;
+
+            return kFileOkay;
+
+#    elif JSON4C4_LINUX
 
             if ( fileOpenMode == kFileReadOnly )
             {
@@ -128,15 +271,50 @@ namespace C4
             }
 
             return result;
+
+#    endif
         }
 
         void CloseFile()
         {
+#    if defined JSON4C4_WINDOWS
+
+            if ( fileHandle != nullptr )
+            {
+                CloseHandle( fileHandle );
+
+                fileHandle = nullptr;
+            }
+
+#    elif JSON4C4_LINUX
+
             fileStream.close();
+
+#    endif
         }
 
         Terathon::uint64 GetFileSize()
         {
+#    if defined JSON4C4_WINDOWS
+
+            if ( fileHandle == nullptr )
+            {
+                return 0;
+            }
+
+            FILE_STANDARD_INFO fileInfo { 0 };
+
+            bool result = GetFileInformationByHandleEx( fileHandle, FileStandardInfo, &fileInfo, sizeof( FILE_STANDARD_INFO ) );
+
+            if ( !result )
+            {
+                return 0;
+            }
+
+            return fileInfo.EndOfFile.QuadPart;
+
+#    elif JSON4C4_LINUX
+
             if ( fileStream.is_open() )
             {
                 std::streampos originalPosition = fileStream.tellg();
@@ -172,11 +350,37 @@ namespace C4
                 return size;
             }
 
-            return 0;
+#    endif
         }
 
         FileStatus ReadFile( char* buffer, Terathon::uint64 size )
         {
+
+#    if defined JSON4C4_WINDOWS
+
+            if ( fileHandle == nullptr )
+            {
+                return kFileNotOpen;
+            }
+
+            if ( size > MAX_FILE_SIZE )
+            {
+                return kFileReadError;
+            }
+
+            DWORD numberOfBytesRead;
+
+            BOOL ok = ::ReadFile( fileHandle, buffer, size, &numberOfBytesRead, nullptr );
+
+            if ( !ok )
+            {
+                return kFileReadError;
+            }
+
+            return kFileOkay;
+
+#    elif defined JSON4C4_LINUX
+
             if ( !fileStream.is_open() )
             {
                 return kFileNotOpen;
@@ -190,14 +394,34 @@ namespace C4
             }
 
             return kFileOkay;
+
+#    endif
         }
 
-        FileStatus WriteFile( char* buffer, Terathon::uint64 size )
+        FileStatus WriteFile( const char* buffer, Terathon::uint64 size )
         {
             if ( IsReadOnly )
             {
                 return kFileWriteError;
             }
+
+#    if defined JSON4C4_WINDOWS
+
+            if ( fileHandle == nullptr )
+            {
+                return kFileNotOpen;
+            }
+
+            bool ok = ::WriteFile( fileHandle, buffer, size, nullptr, nullptr );
+
+            if ( !ok )
+            {
+                return kFileOkay;
+            }
+
+            return kFileWriteError;
+
+#    elif JSON4C4_LINUX
 
             if ( !fileStream.is_open() )
             {
@@ -212,24 +436,41 @@ namespace C4
             }
 
             return kFileOkay;
+
+#    endif
         }
 
         File& operator<<( char c )
         {
+#    if defined JSON4C4_WINDOWS
+
+            if ( fileHandle != nullptr && !IsReadOnly )
+            {
+                this->WriteFile( &c, 1 );
+            }
+#    elif
             if ( fileStream.is_open() && !IsReadOnly )
             {
                 fileStream << c;
             }
-
+#    endif
             return ( *this );
         }
 
         File& operator<<( const char* c )
         {
+#    if defined JSON4C4_WINDOWS
+
+            if ( fileHandle != nullptr && !IsReadOnly )
+            {
+                this->WriteFile( c, Terathon::Text::GetTextLength( c ) );
+            }
+#    elif
             if ( fileStream.is_open() && !IsReadOnly )
             {
                 fileStream.write( c, strlen( c ) );
             }
+#    endif
 
             return ( *this );
         }
