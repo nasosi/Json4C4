@@ -382,8 +382,6 @@ namespace C4
                 return kFileReadError;
             }
 
-            return kFileOkay;
-
 #    elif defined( JSON4C4_LINUX )
 
             if ( !fileStream.is_open() )
@@ -398,9 +396,9 @@ namespace C4
                 return kFileReadError;
             }
 
-            return kFileOkay;
-
 #    endif
+
+            return kFileOkay;
         }
 
         FileStatus WriteFile( const char* buffer, Terathon::uint64 size )
@@ -469,6 +467,7 @@ namespace C4
 
         File& operator<<( const char* c )
         {
+
 #    if defined JSON4C4_WINDOWS
 
             if ( fileHandle != nullptr && !IsReadOnly )
