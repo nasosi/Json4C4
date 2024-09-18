@@ -74,7 +74,7 @@
 
 #    include "C4Files.h"
 
-#elif defined JSON4C4_LINUX
+#elif defined( JSON4C4_LINUX )
 
 #    include <fstream>
 
@@ -202,7 +202,7 @@ namespace C4
 
         HANDLE fileHandle = nullptr;
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
         std::fstream fileStream;
 
@@ -249,7 +249,7 @@ namespace C4
 
             return kFileOkay;
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             if ( fileOpenMode == kFileReadOnly )
             {
@@ -290,7 +290,7 @@ namespace C4
                 fileHandle = nullptr;
             }
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             fileStream.close();
 
@@ -317,7 +317,7 @@ namespace C4
 
             return fileInfo.EndOfFile.QuadPart;
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             if ( fileStream.is_open() )
             {
@@ -383,7 +383,7 @@ namespace C4
 
             return kFileOkay;
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             if ( !fileStream.is_open() )
             {
@@ -425,7 +425,7 @@ namespace C4
 
             return kFileWriteError;
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             if ( !fileStream.is_open() )
             {
@@ -454,7 +454,7 @@ namespace C4
                 this->WriteFile( &c, 1 );
             }
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             if ( fileStream.is_open() && !IsReadOnly )
             {
@@ -475,7 +475,7 @@ namespace C4
                 this->WriteFile( c, Terathon::Text::GetTextLength( c ) );
             }
 
-#    elif defined JSON4C4_LINUX
+#    elif defined( JSON4C4_LINUX )
 
             if ( fileStream.is_open() && !IsReadOnly )
             {
