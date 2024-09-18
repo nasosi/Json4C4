@@ -299,6 +299,7 @@ namespace C4
 
         Terathon::uint64 GetFileSize()
         {
+
 #    if defined( JSON4C4_WINDOWS )
 
             if ( fileHandle == nullptr )
