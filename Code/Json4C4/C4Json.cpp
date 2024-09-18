@@ -245,7 +245,7 @@ namespace C4
 
             return kFileOkay;
 
-#    elif JSON4C4_LINUX
+#    elif defined JSON4C4_LINUX
 
             if ( fileOpenMode == kFileReadOnly )
             {
@@ -286,7 +286,7 @@ namespace C4
                 fileHandle = nullptr;
             }
 
-#    elif JSON4C4_LINUX
+#    elif defined JSON4C4_LINUX
 
             fileStream.close();
 
@@ -313,7 +313,7 @@ namespace C4
 
             return fileInfo.EndOfFile.QuadPart;
 
-#    elif JSON4C4_LINUX
+#    elif defined JSON4C4_LINUX
 
             if ( fileStream.is_open() )
             {
@@ -421,7 +421,7 @@ namespace C4
 
             return kFileWriteError;
 
-#    elif JSON4C4_LINUX
+#    elif defined JSON4C4_LINUX
 
             if ( !fileStream.is_open() )
             {
@@ -448,7 +448,7 @@ namespace C4
             {
                 this->WriteFile( &c, 1 );
             }
-#    elif
+#    elif defined
             if ( fileStream.is_open() && !IsReadOnly )
             {
                 fileStream << c;
@@ -465,7 +465,9 @@ namespace C4
             {
                 this->WriteFile( c, Terathon::Text::GetTextLength( c ) );
             }
-#    elif
+
+#    elif defined JSON4C4_LINUX
+
             if ( fileStream.is_open() && !IsReadOnly )
             {
                 fileStream.write( c, strlen( c ) );
