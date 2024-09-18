@@ -151,12 +151,12 @@ namespace C4
             }
         }
 
-        operator WCHAR*()
+        operator wchar_t*()
         {
             return buffer;
         }
 
-        operator const WCHAR*() const
+        operator const wchar_t*() const
         {
             return buffer;
         }
@@ -446,18 +446,23 @@ namespace C4
 
         File& operator<<( char c )
         {
+
 #    if defined JSON4C4_WINDOWS
 
             if ( fileHandle != nullptr && !IsReadOnly )
             {
                 this->WriteFile( &c, 1 );
             }
-#    elif defined
+
+#    elif defined JSON4C4_LINUX
+
             if ( fileStream.is_open() && !IsReadOnly )
             {
                 fileStream << c;
             }
+
 #    endif
+
             return ( *this );
         }
 
