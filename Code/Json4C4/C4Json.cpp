@@ -49,17 +49,6 @@
 
 #endif
 
-#define JSON4C4VERSIONMAJOR 1
-#define JSON4C4VERSIONMINOR 1
-#define JSON4C4VERSIONPATCH 1
-
-#define STRN( s ) #s
-#define STR( s ) STRN( s )
-
-#define JSON4C4VERSION STR( JSON4C4VERSIONMAJOR ) "." STR( JSON4C4VERSIONMINOR ) "." STR( JSON4C4VERSIONPATCH )
-
-#define MAX_FILE_SIZE 0xffff - 1
-
 #ifndef TERATHON_NO_SYSTEM
 
 #    ifndef JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS
@@ -92,6 +81,17 @@
 #    include <cstring>
 
 #endif
+
+#define JSON4C4VERSIONMAJOR 1
+#define JSON4C4VERSIONMINOR 1
+#define JSON4C4VERSIONPATCH 1
+
+#define STRN( s ) #s
+#define STR( s ) STRN( s )
+
+#define JSON4C4VERSION STR( JSON4C4VERSIONMAJOR ) "." STR( JSON4C4VERSIONMINOR ) "." STR( JSON4C4VERSIONPATCH )
+
+#define MAX_FILE_SIZE 0xffff - 1
 
 namespace C4
 {
@@ -356,7 +356,6 @@ namespace C4
 
             return 0;
 #    endif
-
         }
 
         FileStatus ReadFile( char* buffer, Terathon::uint64 size )
