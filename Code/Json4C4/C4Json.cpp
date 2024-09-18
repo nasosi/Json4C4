@@ -198,7 +198,7 @@ namespace C4
     private:
         bool IsReadOnly = false;
 
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
         HANDLE fileHandle = nullptr;
 
@@ -218,7 +218,7 @@ namespace C4
         {
             CloseFile();
 
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
             const WCharBuffer wideFileName( Terathon::String<> { fileName } );
 
@@ -281,7 +281,7 @@ namespace C4
 
         void CloseFile()
         {
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
             if ( fileHandle != nullptr )
             {
@@ -299,7 +299,7 @@ namespace C4
 
         Terathon::uint64 GetFileSize()
         {
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
             if ( fileHandle == nullptr )
             {
@@ -360,7 +360,7 @@ namespace C4
         FileStatus ReadFile( char* buffer, Terathon::uint64 size )
         {
 
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
             if ( fileHandle == nullptr )
             {
@@ -409,7 +409,7 @@ namespace C4
                 return kFileWriteError;
             }
 
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
             if ( fileHandle == nullptr )
             {
@@ -447,7 +447,7 @@ namespace C4
         File& operator<<( char c )
         {
 
-#    if defined JSON4C4_WINDOWS
+#    if defined( JSON4C4_WINDOWS )
 
             if ( fileHandle != nullptr && !IsReadOnly )
             {
