@@ -354,7 +354,9 @@ namespace C4
                 return size;
             }
 
+            return 0;
 #    endif
+
         }
 
         FileStatus ReadFile( char* buffer, Terathon::uint64 size )
