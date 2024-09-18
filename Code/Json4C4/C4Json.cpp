@@ -33,7 +33,7 @@
 #
 #    define JSON4C4_WINDOWS
 #
-#elif __linux__
+#elif defined( __clang__ ) || ( defined( __GNUC__ ) || ( defined __linux__ ) || ( defined __linux )
 #
 #    define JSON4C4_LINUX
 #
