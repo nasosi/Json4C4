@@ -139,7 +139,7 @@ When ```JSON4C4_DISABLE_STD_SUPPORT``` is defined, or when ```TERATHON_NO_SYSTEM
 ### ```JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS```
 Because C4 Engine implements many system functions, it, by default, does not support system libraries. This can be turned off by undefining ```TERATHON_NO_SYSTEM``` when compiling the C4 Engine. 
 
-Because some system functions enable higher accuracy parsing of floating numbers, Json4C4 provides the ```JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS``` define. If it is defined, then Json4C4 will use [snprintf](https://en.cppreference.com/w/c/string/byte/strtof) to convert a string to the ```double``` type and attain accurate parsing. Otherwise, Json4C4 will use an implementation inspired by the following [OpenDDL](https://github.com/EricLengyel/OpenDDL) implementation, which is somewhat less accurate for edge cases. The inaccuracies are at a level that should not be of concern for most types of computations.
+Because some system functions enable higher accuracy parsing of floating numbers, Json4C4 provides the ```JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS``` define. If it is defined, then Json4C4 will use [strtod](https://en.cppreference.com/w/c/string/byte/strtof) to convert a string to the ```double``` type and attain accurate parsing. Otherwise, Json4C4 will use an implementation inspired by the following [OpenDDL](https://github.com/EricLengyel/OpenDDL) implementation, which is somewhat less accurate for edge cases. The inaccuracies are at a level that should not be of concern for most types of computations.
 
 In the standalone mode, where ```TERATHON_NO_SYSTEM``` is not defined, Json4C4 uses high-accuracy conversions.
 
