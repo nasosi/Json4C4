@@ -63,20 +63,23 @@
 
 #    include "C4Files.h"
 
-#elif defined( JSON4C4_LINUX )
-
-#    include <fstream>
-
 #endif
 
 #ifdef JSON4C4_WINDOWS
 
 #    include "windows.h"
 
+#elif defined( JSON4C4_LINUX )
+
+#    include <fcntl.h>
+#    include <sys/stat.h>
+#    include <unistd.h>
+
 #endif
 
 #ifdef JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS
 
+#    include <cstdio>
 #    include <cstdlib>
 #    include <cstring>
 
@@ -204,7 +207,7 @@ namespace C4
 
 #    elif defined( JSON4C4_LINUX )
 
-        std::fstream fileStream;
+        int fileDescriptor = -1;
 
 #    endif
 
@@ -253,28 +256,30 @@ namespace C4
 
             if ( fileOpenMode == kFileReadOnly )
             {
-                fileStream.open( fileName, std::ios::in | std::ios::binary );
+                int fd = open( fileName, O_RDONLY );
 
-                FileStatus result = fileStream.is_open() ? kFileOkay : kFileOpenFailed;
-
-                if ( result == kFileOkay )
+                if ( fd == -1 )
                 {
-                    IsReadOnly = true;
+                    return kFileOpenFailed;
                 }
 
-                return result;
+                this->fileDescriptor = fd;
+                this->IsReadOnly     = true;
+
+                return kFileOkay;
             }
 
-            fileStream.open( fileName, std::ios::out );
+            int fd = open( fileName, O_WRONLY | O_CREAT, 0644 );
 
-            FileStatus result = fileStream.is_open() ? kFileOkay : kFileOpenFailed;
-
-            if ( result == kFileOkay )
+            if ( fd == -1 )
             {
-                IsReadOnly = false;
+                return kFileOpenFailed;
             }
 
-            return result;
+            this->fileDescriptor = fd;
+            this->IsReadOnly     = false;
+
+            return kFileOkay;
 
 #    endif
         }
@@ -292,7 +297,12 @@ namespace C4
 
 #    elif defined( JSON4C4_LINUX )
 
-            fileStream.close();
+            if ( this->fileDescriptor != -1 )
+            {
+                close( this->fileDescriptor );
+
+                fileDescriptor = -1;
+            }
 
 #    endif
         }
@@ -320,42 +330,22 @@ namespace C4
 
 #    elif defined( JSON4C4_LINUX )
 
-            if ( fileStream.is_open() )
+            if ( this->fileDescriptor == -1 )
             {
-                std::streampos originalPosition = fileStream.tellg();
-
-                fileStream.seekg( std::ios::beg, std::ios::end );
-
-                if ( !fileStream )
-                {
-                    return 0;
-                }
-
-                std::streampos size = fileStream.tellg();
-
-                if ( !fileStream )
-                {
-                    return 0;
-                }
-
-                fileStream.clear();
-
-                if ( !fileStream )
-                {
-                    return 0;
-                }
-
-                fileStream.seekg( originalPosition );
-
-                if ( !fileStream )
-                {
-                    return 0;
-                }
-
-                return size;
+                return 0;
             }
 
-            return 0;
+            struct stat statBuffer;
+
+            int result = fstat( this->fileDescriptor, &statBuffer );
+
+            if ( result != 0 )
+            {
+                return 0;
+            }
+
+            return statBuffer.st_size;
+
 #    endif
         }
 
@@ -374,27 +364,50 @@ namespace C4
                 return kFileReadError;
             }
 
-            DWORD numberOfBytesRead;
+            const char* begin = buffer;
+            const char* end   = begin + size;
+            char*       p     = buffer;
 
-            BOOL ok = ::ReadFile( fileHandle, buffer, size, &numberOfBytesRead, nullptr );
-
-            if ( !ok )
+            while ( p != end )
             {
-                return kFileReadError;
+                DWORD numberOfBytesRead = 0;
+
+                BOOL ok = ::ReadFile( fileHandle, p, end - p, &numberOfBytesRead, nullptr );
+
+                if ( !ok )
+                {
+                    return kFileReadError;
+                }
+
+                p += numberOfBytesRead;
             }
 
 #    elif defined( JSON4C4_LINUX )
 
-            if ( !fileStream.is_open() )
+            if ( this->fileDescriptor == -1 )
             {
                 return kFileNotOpen;
             }
 
-            fileStream.read( buffer, size );
-
-            if ( !fileStream )
+            if ( size > MAX_FILE_SIZE )
             {
                 return kFileReadError;
+            }
+
+            const char* begin = buffer;
+            const char* end   = begin + size;
+            char*       p     = buffer;
+
+            while ( p != end )
+            {
+                int numberOfBytesRead = read( this->fileDescriptor, buffer, end - p );
+
+                if ( numberOfBytesRead == -1 )
+                {
+                    return kFileReadError;
+                }
+
+                p += numberOfBytesRead;
             }
 
 #    endif
@@ -416,73 +429,62 @@ namespace C4
                 return kFileNotOpen;
             }
 
-            bool ok = ::WriteFile( fileHandle, buffer, size, nullptr, nullptr );
+            const char* begin = buffer;
+            const char* end   = begin + size;
+            const char* p     = begin;
 
-            if ( !ok )
+            while ( p != end )
             {
-                return kFileOkay;
-            }
+                DWORD numberOfBytesWritten = 0;
 
-            return kFileWriteError;
+                BOOL ok = ::WriteFile( fileHandle, p, end - p, &numberOfBytesWritten, nullptr );
+
+                if ( !ok )
+                {
+                    return kFileWriteError;
+                }
+
+                p += numberOfBytesWritten;
+            }
 
 #    elif defined( JSON4C4_LINUX )
 
-            if ( !fileStream.is_open() )
+            if ( this->fileDescriptor == -1 )
             {
                 return kFileNotOpen;
             }
 
-            fileStream.write( buffer, size );
+            const char* begin = buffer;
+            const char* end   = begin + size;
+            const char* p     = begin;
 
-            if ( !fileStream )
+            while ( p != end )
             {
-                return kFileWriteError;
+                int numberOfBytesWritten = write( this->fileDescriptor, p, end - p );
+
+                if ( numberOfBytesWritten == -1 )
+                {
+                    return kFileWriteError;
+                }
+
+                p += numberOfBytesWritten;
             }
 
-            return kFileOkay;
-
 #    endif
+
+            return kFileOkay;
         }
 
         File& operator<<( char c )
         {
-
-#    if defined( JSON4C4_WINDOWS )
-
-            if ( fileHandle != nullptr && !IsReadOnly )
-            {
-                this->WriteFile( &c, 1 );
-            }
-
-#    elif defined( JSON4C4_LINUX )
-
-            if ( fileStream.is_open() && !IsReadOnly )
-            {
-                fileStream << c;
-            }
-
-#    endif
+            this->WriteFile( &c, 1 );
 
             return ( *this );
         }
 
         File& operator<<( const char* c )
         {
-
-#    if defined JSON4C4_WINDOWS
-
-            if ( fileHandle != nullptr && !IsReadOnly )
-            {
-                this->WriteFile( c, Terathon::Text::GetTextLength( c ) );
-            }
-
-#    elif defined( JSON4C4_LINUX )
-
-            if ( fileStream.is_open() && !IsReadOnly )
-            {
-                fileStream.write( c, strlen( c ) );
-            }
-#    endif
+            this->WriteFile( c, Terathon::Text::GetTextLength( c ) );
 
             return ( *this );
         }
@@ -1218,14 +1220,18 @@ namespace C4
             {
 
 #ifdef JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS
+
                 constexpr int maxDoubleDigits = 32;
                 char          output[ maxDoubleDigits ];
 
                 snprintf( output, maxDoubleDigits, "%.17g", data );
 
                 file << output;
+
 #else
+
                 file << Text::FloatToString( data );
+
 #endif
 
                 return Status::kOk;
@@ -1811,6 +1817,7 @@ namespace C4
 
         TERATHON_API Status StructuredData::Write( const char* fileName, const uint32 indentationLength, const char indentationChar ) noexcept
         {
+
             File file;
             if ( file.OpenFile( fileName, kFileCreate ) != kFileOkay )
             {
