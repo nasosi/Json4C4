@@ -822,15 +822,7 @@ namespace C4
 
             char* str = new char[ ( *textLength ) + 1 ];
 
-#    ifdef _MSC_VER
-
-            strncpy_s( str, ( *textLength ) + 1, text, ( *textLength ) );
-
-#    else
-
-            strncpy( str, text, ( *textLength ) );
-
-#    endif
+            Text::CopyText( text, str, *textLength );
 
             str[ *textLength ] = 0;
 
