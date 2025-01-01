@@ -115,12 +115,12 @@ GIT_REPOSITORY "C:/users/joe/codes/Json4C4"
 ## Using in projects that do not utilize Terathon data structures
 ### ```std::``` data structures
 Json4C4 supports ```std::string```, ```std::vector```, and ```std::map``` by default in the standalone compilation mode (when ```TERATHON_NO_SYSTEM``` is not defined). If you want to disable these ```std``` data structures, you have two options:
-* If using cmake, compile Json4C4 with the ```Json4C4EnableStdSupport``` cmake argument set to ```No```.
-* If not using cmake, define ```JSON4C4_DISABLE_STD_SUPPORT``` for compiling ```Json4C4.cpp``` or including ```Json4C4.hpp```.
+* If you are using cmake, compile Json4C4 with the ```Json4C4EnableStdSupport``` cmake argument set to ```No```.
+* If you are not using cmake, define ```JSON4C4_DISABLE_STD_SUPPORT``` for compiling ```Json4C4.cpp``` or including ```Json4C4.hpp```.
 
 ### Custom string and array data structures
 If you want to use custom string and array data structures, you have two options:
-1. Implement appropriate overloads. Look in ```C4Json.h``` and ```C4Json.cpp``` inside the code enabled by the ```JSON4C4_ENABLE_STD_SUPPORT_INTERNAL```  for an example of how this is implemented for ```std::string```, ```std::vector```, and ```std::map```.
+1. Implement appropriate overloads. Look in ```C4Json.h``` and ```C4Json.cpp``` inside the code enabled by the ```JSON4C4_ENABLE_STD_SUPPORT_INTERNAL```  for an example of how this is implemented for ```std::string```, ```std::vector```, and ```std::map```, or
 2. Manually perform deserialization and populate your data accordingly. ```Example05_manual_deserialization``` demonstrates how to achieve this.
 
 
@@ -128,10 +128,10 @@ If you want to use custom string and array data structures, you have two options
 Json4C4 uses three preprocessor macros explained below.
 
 ### ```DEFINE_JSON4C4_FUNCTIONS```
-```DEFINE_JSON4C4_FUNCTIONS``` is a convenience macro that provides the definition of the three core functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types.
+```DEFINE_JSON4C4_FUNCTIONS``` is a convenience macro that enables defining the three core functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types.
 
 ### ```DEFINE_JSON4C4_MEMBER_FUNCTIONS```
-```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` is a convenience macro that provides the definition of the three core *member* functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types, as part of a ```class``` or ```struct```. Its main purpose is to allow for validating, deserializing, and serializing member values that are private to the ```class``` or ```struct```.
+```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` is a convenience macro that enables defining  of the three core *member* functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types, as part of a ```class``` or ```struct```. Its main purpose is to allow for validating, deserializing, and serializing member values that are private to the ```class``` or ```struct```.
 
 ### ```JSON4C4_DISABLE_STD_SUPPORT```
 When ```JSON4C4_DISABLE_STD_SUPPORT``` is defined, or when ```TERATHON_NO_SYSTEM``` is defined, Json4C4 will be compiled without ```std::string```, ```std::vector```, and ```std::map``` support.
