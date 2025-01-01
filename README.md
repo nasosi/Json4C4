@@ -11,8 +11,8 @@ The use of Json4C4 includes three main steps. Assume for example a ```struct``` 
 struct TextBox
 {
     Terathon::String<> text;
-    double width = 0;
-    double height = 0;
+    double             width  = 0;
+    double             height = 0;
 };
 ```
 First, you need to define the process rules for deserialization/serialization/validation:
