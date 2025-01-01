@@ -73,7 +73,7 @@ printf( "TextBox text: %s. Width: %f, height: %f\n",
 If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
 ### Optional arguments
-For optional arguments, you can use the keyword ```Json::optional``` to designate them as such before the field name. For example:
+For optional arguments, you can use the keyword ```Json::optional``` to designate them as such before the field name. For example, in the following, absence of ```height``` in the JSON file will not result in an error, and the relevant member will be ignored:
 ```cxx
 #define TEXTBOX_PROTO \
     "text",   object.text,\
