@@ -17,29 +17,29 @@ struct TextBox
 ```
 First, you need to define the process rules for deserialization/serialization/validation:
 ```cxx
-bool Deserialize(const Json::Value* value, TextBox& object)
+bool Deserialize( const Json::Value* value, TextBox& object )
 {
-    return Json::DeserializeProto(value,
-        "text", object.text,
-        "width", object.width,
-        "height",  object.height
+    return Json::DeserializeProto( value,
+        "text",   object.text,
+        "width",  object.width,
+        "height", object.height
 	);
 }
 
-bool Serialize(Json::Value* value, const TextBox& object)
+bool Serialize( Json::Value* value, const TextBox& object )
 {
-    return Json::SerializeProto(value,
-        "text", object.text,
-        "width", object.width,
+    return Json::SerializeProto( value,
+        "text",   object.text,
+        "width",  object.width,
         "height", object.height
 	);
 }
 
 bool Validate(const Json::Value* value, const TextBox& object)
 {
-    return Json::ValidateProto(value,
-        "text", object.text,
-        "width", object.width,
+    return Json::ValidateProto( value,
+        "text",   object.text,
+        "width",  object.width,
         "height", object.height
 	);
 }
@@ -47,8 +47,8 @@ bool Validate(const Json::Value* value, const TextBox& object)
 Alternatively, you can use Json4C4's ```DEFINE_JSON4C4_FUNCTIONS``` macro, which generates all three definitions:
 ```cxx
 #define TEXTBOX_PROTO \
-    "text", object.text,\
-    "width", object.width,\
+    "text",   object.text,\
+    "width",  object.width,\
     "height", object.height
 
 DEFINE_JSON4C4_FUNCTIONS(TextBox, TEXTBOX_PROTO)
@@ -62,11 +62,11 @@ And last, you deserialize the structure. If this call is successful, the data of
 ```cxx
 if (jsonStructuredData.DeserializeTo(textBox))
 {
-    fprintf(stderr, "Deserialization error\n");
+    fprintf( stderr, "Deserialization error\n" );
     return 1;
 }
 
-printf("TextBox text: %s. Width: %f, height: %f\n", static_cast<const char*>(textBox.text), textBox.width, textBox.height);
+printf( "TextBox text: %s. Width: %f, height: %f\n", static_cast<const char*>(textBox.text), textBox.width, textBox.height );
 ```
 If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
@@ -74,8 +74,8 @@ If the ```Deserialize``` call is not  successful, the ```textBox``` object is in
 For optional arguments, you can use the keyword ```Json::optional``` to designate them as such before the field name. For example:
 ```cxx
 #define TEXTBOX_PROTO \
-    "text", object.text,\
-    "width", object.width,\
+    "text",   object.text,\
+    "width",  object.width,\
     Json::optional, "height", object.height
 ```
 ## Integrating into the C4 Engine Visual Studio solution
