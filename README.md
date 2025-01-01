@@ -127,7 +127,7 @@ If you want to use custom string and array data structures, you have two options
 
 
 ## Preprocessor macros
-Json4C4 uses three preprocessor macros explained below.
+Json4C4 uses several preprocessor macros explained below.
 
 ### ```DEFINE_JSON4C4_FUNCTIONS```
 ```DEFINE_JSON4C4_FUNCTIONS``` is a convenience macro that enables defining the three core functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types.
