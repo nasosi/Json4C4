@@ -35,7 +35,7 @@ bool Serialize( Json::Value* value, const TextBox& object )
 	);
 }
 
-bool Validate(const Json::Value* value, const TextBox& object)
+bool Validate( const Json::Value* value, const TextBox& object )
 {
     return Json::ValidateProto( value,
         "text",   object.text,
@@ -60,7 +60,7 @@ auto parseResult = jsonStructuredData.Parse("Data/Examples/simple.json");
 ```
 And last, you deserialize the structure. If this call is successful, the data of the file has been assigned to the object member variables:
 ```cxx
-if (jsonStructuredData.DeserializeTo(textBox))
+if ( jsonStructuredData.DeserializeTo( textBox ) )
 {
     fprintf( stderr, "Deserialization error\n" );
     return 1;
