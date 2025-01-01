@@ -56,9 +56,10 @@ DEFINE_JSON4C4_FUNCTIONS(TextBox, TEXTBOX_PROTO)
 Second, you create a ```Json::StructuredData``` and parse the file:
 ```cxx
 Json::StructuredData jsonStructuredData;
-auto parseResult = jsonStructuredData.Parse("Data/Examples/simple.json");
+
+auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
 ```
-And last, you deserialize the structure. If this call is successful, the data of the file has been assigned to the object member variables:
+And last, you deserialize the structure. If this call is successful, the data of the file has been assigned to the ```textBox``` object member variables:
 ```cxx
 if ( jsonStructuredData.DeserializeTo( textBox ) )
 {
@@ -66,7 +67,8 @@ if ( jsonStructuredData.DeserializeTo( textBox ) )
     return 1;
 }
 
-printf( "TextBox text: %s. Width: %f, height: %f\n", static_cast<const char*>(textBox.text), textBox.width, textBox.height );
+printf( "TextBox text: %s. Width: %f, height: %f\n",
+        static_cast< const char* >( textBox.text ), textBox.width, textBox.height );
 ```
 If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
@@ -89,7 +91,7 @@ The easiest way to incorporate Json4C4 into any C++ project that uses cmake is b
 include( FetchContent )
 
 # Optional: uncomment the following line if you don't want std::string and std::vector support.
-# set(Json4C4EnableStdSupport No CACHE INTERNAL "")  
+# set( Json4C4EnableStdSupport No CACHE INTERNAL "" )  
 
 FetchContent_Declare(
   Json4C4
