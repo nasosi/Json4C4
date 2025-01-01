@@ -133,7 +133,7 @@ Json4C4 uses several preprocessor macros explained below.
 ```DEFINE_JSON4C4_FUNCTIONS``` is a convenience macro that enables defining the three core functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types.
 
 ### ```DEFINE_JSON4C4_MEMBER_FUNCTIONS```
-```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` is a convenience macro that enables defining  of the three core *member* functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types, as part of a ```class``` or ```struct```. Its main purpose is to allow for validating, deserializing, and serializing member values that are private to the ```class``` or ```struct```.
+```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` is a convenience macro that enables defining the three core *member* functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types, as part of a ```class``` or ```struct```. Its main purpose is to allow for validating, deserializing, and serializing member values that are private to the ```class``` or ```struct```.
 
 ### ```JSON4C4_DISABLE_STD_SUPPORT```
 When ```JSON4C4_DISABLE_STD_SUPPORT``` is defined, or when ```TERATHON_NO_SYSTEM``` is defined, Json4C4 will be compiled without ```std::string```, ```std::vector```, and ```std::map``` support.
