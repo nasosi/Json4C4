@@ -4,6 +4,8 @@
   Author: Nasos
 -->
 
+<meta name="google-site-verification" content="heY3CyjboX5m9hGfx0mijLB2EmnNtuIkOCO7JBnFG-M" />
+
 # Json4C4
 Json4C4 is a general-purpose JSON library developed to integrate well with the [C4 Engine](https://c4engine.com/). Json4C4 can also be used in any C++ application if desired.
 
