@@ -455,6 +455,17 @@ namespace C4
 
             template <class T>
             using HasSerializeMember = IsDetectedExact<Status, SerializeMemberOperator, T>;
+
+            template <class T, int32 baseCount>
+            void PurgePointerArray( Array<T*, baseCount>& array )
+            {
+                for (T* elem : array)
+                {
+                    delete elem;
+                }
+
+                array.PurgeArray();
+            }
         } // namespace Detail
 
         class ArrayValue final : public Value
@@ -886,7 +897,7 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    valueData->PurgeArray();
+                    Detail::PurgePointerArray( *valueData );
                     valueData->ReserveArrayElementCount( data.GetArrayElementCount() );
 
                     for ( const T& element : data )
@@ -1201,7 +1212,7 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    valueData->PurgeArray();
+                    Detail::PurgePointerArray( *valueData );
                     valueData->ReserveArrayElementCount( int32( data.size() ) );
 
                     for ( const T& element : data )
