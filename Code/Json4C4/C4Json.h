@@ -459,7 +459,7 @@ namespace C4
             template <class T, int32 baseCount>
             void PurgePointerArray( Array<T*, baseCount>& array )
             {
-                for (T* elem : array)
+                for ( T* elem : array )
                 {
                     delete elem;
                 }
@@ -988,16 +988,18 @@ namespace C4
                 [ & ]()
                 {
                     using DataMapElementType = typename ObjectMap<T>::ElementType;
+
                     Status status;
-                    bool   addedNew = false;
 
                     for ( const auto* objectValueMapElement : *objectValue )
                     {
-                        DataMapElementType* dataMapElement = data.FindMapElement( objectValueMapElement->GetKey() );
+                        const auto& key = objectValueMapElement->GetKey();
 
-                        addedNew = false;
+                        DataMapElementType* dataMapElement = data.FindMapElement( key );
 
-                        if ( !dataMapElement )
+                        const bool addedNew = ( dataMapElement == nullptr );
+
+                        if ( addedNew )
                         {
                             status = MayThrow(
                                 [ & ]()
@@ -1011,9 +1013,7 @@ namespace C4
                                 return status;
                             }
 
-                            dataMapElement->name = objectValueMapElement->GetKey();
-
-                            addedNew = true;
+                            dataMapElement->name = key;
                         }
 
                         if constexpr ( Detail::HasDeserializeMember<T>::Value )
@@ -1035,18 +1035,23 @@ namespace C4
                             return status;
                         }
 
-                        status = MayThrow(
-                            [ & ]()
-                            {
-                                data.InsertMapElement( dataMapElement );
-                                return Status::kOk;
-                            } );
-
-                        if ( status != Status::kOk )
+                        if ( addedNew )
                         {
-                            return status;
+                            status = MayThrow(
+                                [ & ]()
+                                {
+                                    data.InsertMapElement( dataMapElement );
+                                    return Status::kOk;
+                                } );
+
+                            if ( status != Status::kOk )
+                            {
+                                delete dataMapElement;
+                                return status;
+                            }
                         }
                     }
+
                     return Status::kOk;
                 } );
         }
@@ -1076,7 +1081,7 @@ namespace C4
 
                         if constexpr ( Detail::HasSerializeMember<T>::Value )
                         {
-                            status = dataMapElement->data.Serialize( value );
+                            status = dataMapElement->data.Serialize( elem );
                         }
                         else
                         {
@@ -1132,7 +1137,7 @@ namespace C4
                     {
                         if constexpr ( Detail::HasValidateMember<T>::Value )
                         {
-                            status = temp->Validate( value );
+                            status = temp.Validate( value );
                         }
                         else
                         {
@@ -1235,7 +1240,7 @@ namespace C4
 
                         if constexpr ( Detail::HasSerializeMember<T>::Value )
                         {
-                            status = element->Serialize( value );
+                            status = element.Serialize( value );
                         }
                         else
                         {
@@ -1352,7 +1357,7 @@ namespace C4
 
                         if constexpr ( Detail::HasSerializeMember<T>::Value )
                         {
-                            status = dataMapElementData.Serialize( value );
+                            status = dataMapElementData.Serialize( elem );
                         }
                         else
                         {
