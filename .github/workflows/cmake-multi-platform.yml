@@ -47,7 +47,7 @@ jobs:
             c_compiler: cl
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Configure CMake
       run: >
@@ -101,3 +101,17 @@ jobs:
       env:
         UBSAN_OPTIONS: print_stacktrace=1
       run: ctest --output-on-failure
+
+  no-system:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Compile without the system library
+      shell: cmd
+      run: |
+        for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VisualStudioPath=%%i"
+        call "%VisualStudioPath%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+        cl /nologo /c /O2 /std:c++17 /W4 /WX /EHsc /DTERATHON_NO_SYSTEM /ICode\Json4C4 /ICode\Terathon /ICode\NumberText Code\Json4C4\C4Json.cpp /FoC4JsonExceptions.obj || exit /b 1
+        cl /nologo /c /O2 /std:c++17 /W4 /WX /EHs-c- /D_HAS_EXCEPTIONS=0 /DTERATHON_NO_SYSTEM /ICode\Json4C4 /ICode\Terathon /ICode\NumberText Code\Json4C4\C4Json.cpp /FoC4JsonNoExceptions.obj || exit /b 1

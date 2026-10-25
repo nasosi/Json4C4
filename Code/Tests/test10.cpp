@@ -234,6 +234,53 @@ void TestNumbers()
     Check( ReadTextFile( "Data/Test/out_test10_numbers.json", text ) && strstr( text, "  0.1,\n" ) != nullptr, "0.1 is written in its shortest form" );
 }
 
+void TestNumberLayout()
+{
+    struct Layout
+    {
+        double      value;
+        const char* text;
+    };
+
+    const Layout layouts[] = { { 0.1, "0.1" },
+                               { 123456789, "123456789" },
+                               { -0.0, "-0" },
+                               { 0.000001, "0.000001" },
+                               { 1e-7, "1e-7" },
+                               { 1e20, "100000000000000000000" },
+                               { 1e21, "1e+21" },
+                               { 5e-324, "5e-324" },
+                               { 1.7976931348623157e308, "1.7976931348623157e+308" } };
+
+    Terathon::Array<double> numbers;
+
+    for ( const Layout& layout : layouts )
+    {
+        numbers.AppendArrayElement( layout.value );
+    }
+
+    Json::StructuredData sd;
+    CheckStatus( sd.SerializeFrom( numbers ), Json::Status::kOk, "serialize the layout numbers" );
+    CheckStatus( sd.Write( "Data/Test/out_test10_layout.json" ), Json::Status::kOk, "write the layout numbers" );
+
+    Terathon::String<> text;
+    Check( ReadTextFile( "Data/Test/out_test10_layout.json", text ), "read the layout numbers" );
+
+    for ( const Layout& layout : layouts )
+    {
+        Terathon::String<> element = "\n  ";
+        element += layout.text;
+
+        Terathon::String<> followedByComma = element;
+        followedByComma += ",";
+
+        Terathon::String<> followedByNewline = element;
+        followedByNewline += "\n";
+
+        Check( strstr( text, followedByComma ) != nullptr || strstr( text, followedByNewline ) != nullptr, layout.text );
+    }
+}
+
 void TestInvalidStrings()
 {
     Json::StructuredData sd;
@@ -299,6 +346,7 @@ int main()
     TestVectors();
     TestOverwrite();
     TestNumbers();
+    TestNumberLayout();
     TestInvalidStrings();
     TestLargeFile();
 

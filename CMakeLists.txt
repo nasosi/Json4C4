@@ -160,6 +160,8 @@ target_include_directories( Json4C4
         $<INSTALL_INTERFACE:include/${Json4C4VDirWithVersion}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Code>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Code/Terathon>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Code/NumberText
 )
 
 
@@ -200,7 +202,7 @@ install(EXPORT Json4C4Targets
   FILE
     Json4C4Targets.cmake
   NAMESPACE
-    JsoN4C4::
+    Json4C4::
   DESTINATION
     ${CMAKE_INSTALL_LIBDIR}/cmake/${Json4C4VDirWithVersion}
 )
