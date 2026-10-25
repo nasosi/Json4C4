@@ -1,9 +1,14 @@
+/* NumberText: decimal text to and from IEEE 754 doubles and floats, and integers to text, in one C99 header.
+
+   To the extent possible under law, Athanasios Iliopoulos has waived all copyright and related or neighboring rights to NumberText. This work is published from: United States.
+   See https://creativecommons.org/publicdomain/zero/1.0/ (CC0 1.0 Universal). */
+
 #ifndef NUMBERTEXT_H
 #define NUMBERTEXT_H
 
 #define NUMBERTEXT_VERSION_MAJOR 0
 #define NUMBERTEXT_VERSION_MINOR 5
-#define NUMBERTEXT_VERSION_PATCH 0
+#define NUMBERTEXT_VERSION_PATCH 1
 
 #define NUMBERTEXT_F64_MAX_CHARS 32
 #define NUMBERTEXT_F32_MAX_CHARS 24
