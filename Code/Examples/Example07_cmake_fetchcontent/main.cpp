@@ -10,7 +10,7 @@ int main()
 
     if ( parseResult.status != C4::Json::Status::kOk )
     {
-        std::cerr << "Parsing error: " <<  static_cast<const char*>( C4::Json::ParseResultToString( parseResult ) ) << endl;
+        std::cerr << "Parsing error: " <<  static_cast<const char*>( C4::Json::ParseResultToString( parseResult ) ) << std::endl;
     }
 
     return 0;
