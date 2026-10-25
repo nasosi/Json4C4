@@ -58,6 +58,24 @@ message( STATUS "Json4C4: version: " ${Json4C4Version} )
 
 option(Json4C4EnableStdSupport "Enable std::string and std::vector support" Yes)
 option(Json4C4DisableExceptions "Disable Exceptions" No)
+option(Json4C4EnableSanitizers "Build with the address and undefined behavior sanitizers" No)
+
+if ( ${Json4C4EnableSanitizers} )
+
+    if ( MSVC )
+
+        add_compile_options( /fsanitize=address /Zi )
+
+    else()
+
+        add_compile_options( -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined )
+        add_link_options( -fsanitize=address,undefined )
+
+    endif()
+
+    message( STATUS "Json4C4: sanitizers enabled")
+
+endif()
 
 
 If ( ${Json4C4DisableExceptions} )

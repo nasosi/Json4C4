@@ -1,5 +1,7 @@
 #include <Json4C4/C4Json.h>
 
+#include <cstdio>
+
 namespace Json = C4::Json;
 
 struct ObjectInObjectArray
@@ -93,13 +95,13 @@ int main()
 
     RootObject rootObject2;
 
-    if (jSd.DeserializeTo(rootObject2) != Json::Status::kOk)
+    if (jSd2.DeserializeTo(rootObject2) != Json::Status::kOk)
     {
         fprintf(stderr, "Failed to deserialize.");
         return 1;
     }
 
-    bool ok = (rootObject2.d == rootObject.d) && (rootObject2.doubleArray[5] == rootObject2.doubleArray[5]) &&
+    bool ok = (rootObject2.d == rootObject.d) && (rootObject2.doubleArray[5] == rootObject.doubleArray[5]) &&
               (rootObject2.object.objectInObjectArrayArray[2].string == rootObject.object.objectInObjectArrayArray[2].string) &&
               (rootObject2.object.objectInObjectArrayArray[2].d == rootObject.object.objectInObjectArrayArray[2].d);
 

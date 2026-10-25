@@ -88,6 +88,30 @@ For optional arguments, you can use the keyword ```Json::optional``` to designat
     "width",  object.width,\
     Json::optional, "height", object.height
 ```
+
+### Parse options
+Both ```Parse``` overloads take an optional ```Json::ParseOptions```:
+```cxx
+Json::ParseOptions options;
+options.duplicateNames  = Json::DuplicateNames::kKeepLast;
+options.maxNestingDepth = 64;
+
+auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", options );
+```
+* ```duplicateNames``` decides what happens when an object repeats a name. ```kReject``` (the default) fails with ```Status::kDuplicateName```, ```kKeepFirst``` keeps the first value and ```kKeepLast``` keeps the last one. A kept name stays where it first appeared.
+* ```maxNestingDepth``` limits how deeply arrays and objects may nest. Deeper documents fail with ```Status::kMaximumNestingDepthExceeded``` instead of exhausting the stack. The default is ```JSON4C4_MAX_NESTING_DEPTH``` (256).
+
+### Version 2.0
+Version 2.0 changes the following, and code written for 1.x may need updating:
+* The file status codes are now ```kFileOpenError```, ```kFileReadError``` and ```kFileTooLarge```. ```kMaximumNestingDepthExceeded```, ```kDuplicateName``` and ```kFileWriteError``` are new.
+* Duplicate names are rejected by default (see ```ParseOptions```).
+* A failed ```Parse``` clears the previously loaded document.
+* Deserializing into an ```ObjectMap``` or ```std::map``` replaces its contents. On failure, arrays, vectors and ```ObjectMap```s are left empty and a ```std::map``` is left unchanged.
+* ```Write``` refuses NaN and infinity (```Status::kFloatInvalid```) and strings that are not valid UTF-8 (```Status::kStringIllegalChar```). Outside the C4 Engine it writes to a temporary file and replaces the target only when everything was written, so a failed write leaves an existing file untouched. Symbolic links and files with more than one hard link are written in place instead.
+* Numbers are written in the shortest form that reads back to the same value.
+* ```ObjectValue``` no longer exposes its map publicly. Use ```FindValue```, ```InsertAccountedMapElement```, ```RemoveAccountedMapElement``` and ```PurgeAccountedMap```.
+* ```Value::Write``` writes into an ```Array<char>```.
+
 ## Integrating into the C4 Engine Visual Studio solution
 First, copy the ```Json4C4.h```and ```Json4C4.cpp``` files from the ```Code/Json4C4``` subfolder into the C4 Engine ```EngineCode``` directory. Subsequently, add the two files to the ```Engine``` project by right-clicking on the ```System``` filter under the ```Engine``` project in the ```Solution Explorer``` and selecting ```Add->Existing Item```.
 
@@ -104,7 +128,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v1.1.1 # Or whatever version you select
+  GIT_TAG v2.0.0 # Or whatever version you select
   GIT_SHALLOW TRUE
 )
 
@@ -149,9 +173,13 @@ When ```JSON4C4_DISABLE_STD_SUPPORT``` is defined, or when ```TERATHON_NO_SYSTEM
 ### ```JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS```
 Because C4 Engine implements many system functions, it, by default, does not support system libraries. This can be turned off by undefining ```TERATHON_NO_SYSTEM``` when compiling the C4 Engine. 
 
-Because some system functions enable higher accuracy parsing of floating numbers, Json4C4 provides the ```JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS``` define. If it is defined, then Json4C4 will use [strtod](https://en.cppreference.com/w/c/string/byte/strtof) to convert a string to the ```double``` type and attain accurate parsing. Otherwise, Json4C4 will use an implementation inspired by the following [OpenDDL](https://github.com/EricLengyel/OpenDDL) implementation, which is somewhat less accurate for edge cases. The inaccuracies are at a level that should not be of concern for most types of computations.
+If ```JSON4C4_USE_SYSTEM_DOUBLE_STRING_CONVERSIONS``` is defined, Json4C4 uses [strtod](https://en.cppreference.com/w/c/string/byte/strtof) and ```snprintf``` to convert numbers, independently of the current locale. Otherwise it uses its own exact conversions, which give the same results without the system library. In the standalone mode, where ```TERATHON_NO_SYSTEM``` is not defined, the system conversions are used.
 
-In the standalone mode, where ```TERATHON_NO_SYSTEM``` is not defined, Json4C4 uses high-accuracy conversions.
+### ```JSON4C4_MAX_NESTING_DEPTH```
+The default for ```ParseOptions::maxNestingDepth```, 256 unless defined otherwise.
+
+### ```JSON4C4_MAX_FILE_SIZE```
+The largest file ```Parse``` reads and ```Write``` produces, 0x7FFFFFFE bytes unless defined otherwise.
 
 ## Third party licenses
 Third-party licenses are located in the ```Licenses``` subfolder.
