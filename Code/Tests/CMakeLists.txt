@@ -24,6 +24,10 @@ function( Json4C4AddTest testName )
         target_compile_options( ${testName} PRIVATE -Wall -Wextra -Werror -Wno-strict-aliasing )
     endif()
 
+    if ( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" )
+        target_compile_options( ${testName} PRIVATE -Wno-error=stringop-overflow )
+    endif()
+
     add_test( NAME ${testName} COMMAND $<TARGET_FILE:${testName}> WORKING_DIRECTORY ${Json4C4TestsWorkingDirectory} )
     set_tests_properties( ${testName} PROPERTIES SKIP_RETURN_CODE 77 )
 
@@ -46,7 +50,3 @@ Json4C4AddTest( test14 )
 Json4C4AddTest( test15 )
 Json4C4AddTest( test16 )
 Json4C4AddTest( test17 )
-
-if ( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" )
-    target_compile_options( test12 PRIVATE -Wno-stringop-overflow )
-endif()
