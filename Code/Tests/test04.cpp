@@ -1,5 +1,7 @@
 #include <Json4C4/C4Json.h>
 
+#include <cstdio>
+
 namespace Json = C4::Json;
 using String   = Terathon::String<>;
 

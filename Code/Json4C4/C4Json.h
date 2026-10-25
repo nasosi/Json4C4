@@ -31,14 +31,27 @@
 #ifndef C4Json_h
 #define C4Json_h
 
+#if defined( _MSC_VER )
+
+#    pragma warning( push )
+
+#endif
+
 #include "TSArray.h"
 #include "TSMap.h"
 #include "TSString.h"
 
 #if defined( _MSC_VER )
 
+#    pragma warning( pop )
 #    pragma warning( push )
 #    pragma warning( disable : 4530 ) // C++ exception handler used, but unwind semantics are not enabled
+
+#endif
+
+#ifndef JSON4C4_MAX_NESTING_DEPTH
+
+#    define JSON4C4_MAX_NESTING_DEPTH 256
 
 #endif
 
@@ -68,8 +81,6 @@
 
 namespace C4
 {
-    class File;
-
     namespace Json
     {
         using namespace Terathon;
@@ -131,9 +142,9 @@ namespace C4
         enum class Status : unsigned int
         {
             kOk = 0,
-            KFileOpenError,
-            KFileReadError,
-            KFileTooLarge,
+            kFileOpenError,
+            kFileReadError,
+            kFileTooLarge,
             kTextBufferContentsInvalid,
             kUnterminatedTextBuffer,
             kExpectedOpeningCurlyBraces,
@@ -156,7 +167,10 @@ namespace C4
             kMissingObjectElement,
             kException,
             kInvalidValueType,
-            kNameNotPresent
+            kNameNotPresent,
+            kMaximumNestingDepthExceeded,
+            kDuplicateName,
+            kFileWriteError
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -166,6 +180,19 @@ namespace C4
             Status status      = Status::kOk;
             int32  errorLine   = 0;
             int32  errorColumn = 0;
+        };
+
+        enum class DuplicateNames : unsigned int
+        {
+            kReject = 0,
+            kKeepFirst,
+            kKeepLast
+        };
+
+        struct ParseOptions
+        {
+            DuplicateNames duplicateNames  = DuplicateNames::kReject;
+            int32          maxNestingDepth = JSON4C4_MAX_NESTING_DEPTH;
         };
 
         inline const Detail::Optional optional;
@@ -215,7 +242,7 @@ namespace C4
             using KeyType = Terathon::String<>;
 
             KeyType   name;
-            ValueType data = ValueType {};
+            ValueType data = ValueType();
 
             TERATHON_API inline const KeyType& GetKey() const noexcept
             {
@@ -232,7 +259,13 @@ namespace C4
 
         class Value : public Terathon::MapElement<Value>
         {
+            friend class ObjectValue;
+
         private:
+            uint64 insertionSequence = 0;
+
+            using Terathon::MapElement<Value>::GetOwningMap;
+
             inline virtual String<>* GetStringData() noexcept
             {
                 return nullptr;
@@ -305,7 +338,7 @@ namespace C4
                 return nullptr;
             }
 
-            virtual Status Write( File& file, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const = 0;
+            virtual Status Write( Array<char>& output, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const = 0;
 
             template <class T>
             T* GetDataAsPointerTo() noexcept
@@ -466,12 +499,26 @@ namespace C4
 
                 array.PurgeArray();
             }
+
+            template <class T>
+            void ReserveArraySafely( Array<T>& array, int32 count )
+            {
+                Array<T> grown( count );
+
+                for ( T& element : array )
+                {
+                    grown.AppendArrayElement( static_cast<T&&>( element ) );
+                }
+
+                array.~Array<T>();
+                new ( &array ) Array<T>( static_cast<Array<T>&&>( grown ) );
+            }
         } // namespace Detail
 
         class ArrayValue final : public Value
         {
         public:
-            static Status Parse( ArrayValue* jsonArray, const char*& text ) noexcept;
+            static Status Parse( ArrayValue* jsonArray, const char*& text, const ParseOptions& options, int32 depth ) noexcept;
 
         public:
             using DataType = Array<Value*>;
@@ -484,21 +531,25 @@ namespace C4
 
             TERATHON_API const Array<Value*>* GetJsonValueArrayData() const noexcept override;
 
-            TERATHON_API Status Write( File& file, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const override;
+            TERATHON_API Status Write( Array<char>& output,
+                                       uint32       indentationLength,
+                                       const char   indentationChar,
+                                       Array<char>& indentationCharArray ) const override;
         };
 
-        class ObjectValue final : public Value, public Map<Value>
+        class ObjectValue final : public Value, private Map<Value>
         {
         private:
-            Array<String<>> insertionOrder;
+            uint64 nextInsertionSequence = 0;
 
         public:
-            using Map<Value>::RemoveAllMapElements;
             using Map<Value>::begin;
             using Map<Value>::end;
+            using Map<Value>::FindMapElement;
+            using Map<Value>::GetMapElementCount;
 
         public:
-            static Status Parse( ObjectValue* jsonObjectValue, const char*& text ) noexcept;
+            static Status Parse( ObjectValue* jsonObjectValue, const char*& text, const ParseOptions& options, int32 depth ) noexcept;
 
         public:
             TERATHON_API ~ObjectValue() noexcept override;
@@ -506,16 +557,24 @@ namespace C4
             TERATHON_API ObjectValue*       AsJsonObjectValue() noexcept override;
             TERATHON_API const ObjectValue* AsJsonObjectValue() const noexcept override;
 
-            TERATHON_API const String<>* FindString( const char* name ) const noexcept;
-            TERATHON_API const double*   FindNumber( const char* name ) const noexcept;
-            TERATHON_API const bool*     FindBool( const char* name ) const noexcept;
-            TERATHON_API const Null*     FindJsonNull( const char* name ) const noexcept;
-            TERATHON_API const Array<Value*>* FindJsonValueArray( const char* name ) const noexcept;
-            TERATHON_API const ObjectValue*   FindJsonObjectValue( const char* name ) const noexcept;
+            TERATHON_API Value*       FindValue( const char* key ) noexcept;
+            TERATHON_API const Value* FindValue( const char* key ) const noexcept;
 
-            TERATHON_API bool InsertAccountedMapElement( Value* element );
+            TERATHON_API const String<>* FindString( const char* key ) const noexcept;
+            TERATHON_API const double*   FindNumber( const char* key ) const noexcept;
+            TERATHON_API const bool*     FindBool( const char* key ) const noexcept;
+            TERATHON_API const Null*     FindJsonNull( const char* key ) const noexcept;
+            TERATHON_API const Array<Value*>* FindJsonValueArray( const char* key ) const noexcept;
+            TERATHON_API const ObjectValue*   FindJsonObjectValue( const char* key ) const noexcept;
 
-            TERATHON_API Status Write( File& file, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const override;
+            TERATHON_API bool   InsertAccountedMapElement( Value* element ) noexcept;
+            TERATHON_API Value* RemoveAccountedMapElement( const char* key ) noexcept;
+            TERATHON_API void   PurgeAccountedMap() noexcept;
+
+            TERATHON_API Status Write( Array<char>& output,
+                                       uint32       indentationLength,
+                                       const char   indentationChar,
+                                       Array<char>& indentationCharArray ) const override;
         };
 
         namespace Detail
@@ -545,6 +604,16 @@ namespace C4
             template <>
             TERATHON_API Value* CreateValueFor( const Null& ) noexcept( false );
 
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+
+            template <class T>
+            Value* CreateValueFor( const std::vector<T>& ) noexcept( false )
+            {
+                return new ArrayValue;
+            }
+
+#endif
+
         } // namespace Detail
 
         class StructuredData
@@ -561,8 +630,8 @@ namespace C4
             void operator=( const StructuredData& ) = delete;
             void operator=( StructuredData& )       = delete;
 
-            TERATHON_API ParseResult Parse( const char* fileName ) noexcept;
-            TERATHON_API ParseResult Parse( const Array<char>& nullTerminatedTextBuffer ) noexcept;
+            TERATHON_API ParseResult Parse( const char* fileName, const ParseOptions& options = ParseOptions() ) noexcept;
+            TERATHON_API ParseResult Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options = ParseOptions() ) noexcept;
 
             TERATHON_API Status Write( const char* fileName, const uint32 indentationLength = 2, const char indentationChar = ' ' ) noexcept;
 
@@ -572,6 +641,11 @@ namespace C4
             template <class T>
             Status DeserializeTo( T& data ) noexcept
             {
+                if ( !rootJsonValue )
+                {
+                    return Status::kInvalidStructuredData;
+                }
+
                 return MayThrow(
                     [ & ]()
                     {
@@ -589,15 +663,12 @@ namespace C4
             template <class T>
             Status SerializeFrom( const T& data ) noexcept
             {
-                if ( rootJsonValue != nullptr )
-                {
-                    delete rootJsonValue;
-                }
+                Value* newRoot = nullptr;
 
                 Status status = MayThrow(
                     [ & ]()
                     {
-                        rootJsonValue = Detail::CreateValueFor( data );
+                        newRoot = Detail::CreateValueFor( data );
                         return Status::kOk;
                     } );
 
@@ -606,24 +677,40 @@ namespace C4
                     return status;
                 }
 
-                return MayThrow(
+                status = MayThrow(
                     [ & ]()
                     {
                         if constexpr ( Detail::HasSerializeMember<T>::Value )
                         {
-                            return data.Serialize( this->GetRootJsonValue() );
+                            return data.Serialize( newRoot );
                         }
                         else
                         {
-                            return Serialize( this->GetRootJsonValue(), data );
+                            return Serialize( newRoot, data );
                         }
                     } );
+
+                if ( status != Status::kOk )
+                {
+                    delete newRoot;
+                    return status;
+                }
+
+                delete rootJsonValue;
+                rootJsonValue = newRoot;
+
+                return Status::kOk;
             }
         };
 
         template <class T>
         Status Validate( const StructuredData& sd, const T& data ) noexcept
         {
+            if ( !sd.GetRootJsonValue() )
+            {
+                return Status::kInvalidStructuredData;
+            }
+
             return MayThrow(
                 [ & ]()
                 {
@@ -643,14 +730,14 @@ namespace C4
         template <class T>
         Status Validate( const Value* value, const char* name, const T& data ) noexcept
         {
-            const ObjectValue* objectValue = value->AsJsonObjectValue();
+            const ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
                 return Status::kInvalidValueType;
             }
 
-            const Value* associateValue = objectValue->FindMapElement( name );
+            const Value* associateValue = objectValue->FindValue( name );
 
             if ( !associateValue )
             {
@@ -663,14 +750,14 @@ namespace C4
         template <class T>
         Status Deserialize( const Value* value, const char* name, T& data ) noexcept
         {
-            const ObjectValue* objectValue = value->AsJsonObjectValue();
+            const ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
                 return Status::kInvalidValueType;
             }
 
-            const Value* associateValue = objectValue->FindMapElement( name );
+            const Value* associateValue = objectValue->FindValue( name );
 
             if ( !associateValue )
             {
@@ -683,128 +770,164 @@ namespace C4
         template <class T>
         Status Serialize( Value* value, const char* name, const T& data ) noexcept
         {
-            ObjectValue* objectValue = value->AsJsonObjectValue();
-
-            if ( objectValue )
+            if ( !value )
             {
-
-                Value* associateValue = nullptr;
-
-                Status status = MayThrow(
-                    [ & ]()
-                    {
-                        associateValue       = Detail::CreateValueFor( data );
-                        associateValue->name = name;
-                        Serialize( associateValue, data );
-
-                        objectValue->InsertAccountedMapElement( associateValue );
-
-                        return Status::kOk;
-                    } );
-
-                if ( status != Status::kOk )
-                {
-                    if ( associateValue != nullptr )
-                    {
-                        delete associateValue;
-                    }
-                    return status;
-                }
-
-                return Status::kOk;
+                return Status::kInvalidValueType;
             }
 
-            Array<Value*>* valueArray = value->GetDataAsPointerTo<Array<Value*>>();
-            if ( valueArray != nullptr )
+            ObjectValue*   objectValue = value->AsJsonObjectValue();
+            Array<Value*>* valueArray  = value->GetDataAsPointerTo<Array<Value*>>();
+
+            if ( !objectValue && !valueArray )
             {
-                Value* element = nullptr;
-
-                Status status = MayThrow(
-                    [ & ]()
-                    {
-                        element = Detail::CreateValueFor( data );
-                        valueArray->AppendArrayElement( element );
-                        return Status::kOk;
-                    } );
-
-                if ( status != Status::kOk )
-                {
-                    if ( element != nullptr )
-                    {
-                        delete element;
-                    }
-                    return status;
-                }
-
-                return MayThrow( [ & ]() { return Serialize( element, data ); } );
+                return Status::kInvalidValueType;
             }
 
-            return Status::kInvalidValueType;
+            Value* element = nullptr;
+
+            Status status = MayThrow(
+                [ & ]()
+                {
+                    element = Detail::CreateValueFor( data );
+
+                    if ( objectValue )
+                    {
+                        element->name = name;
+                    }
+
+                    return Serialize( element, data );
+                } );
+
+            if ( status == Status::kOk )
+            {
+                status = MayThrow(
+                    [ & ]()
+                    {
+                        if ( objectValue )
+                        {
+                            return objectValue->InsertAccountedMapElement( element ) ? Status::kOk : Status::kDuplicateName;
+                        }
+
+                        Status appendStatus = MayThrow(
+                            [ & ]()
+                            {
+                                valueArray->AppendArrayElement( element );
+                                return Status::kOk;
+                            } );
+
+                        if ( appendStatus != Status::kOk )
+                        {
+                            Status repairStatus = MayThrow(
+                                [ & ]()
+                                {
+                                    Detail::ReserveArraySafely( *valueArray, valueArray->GetArrayElementCount() );
+                                    return Status::kOk;
+                                } );
+
+                            if ( repairStatus != Status::kOk )
+                            {
+                                Detail::PurgePointerArray( *valueArray );
+                            }
+                        }
+
+                        return appendStatus;
+                    } );
+            }
+
+            if ( status != Status::kOk )
+            {
+                delete element;
+            }
+
+            return status;
         }
 
         template <class T>
-        Status Validate( const Value* value, const T& /*data*/ ) noexcept
+        Status Validate( const Value* value, const T& data ) noexcept
         {
-            const T* valueData = value->GetDataAsPointerTo<T>();
+            if ( !value )
+            {
+                return Status::kInvalidValueType;
+            }
 
-            return valueData ? Status::kOk : Status::kInvalidValueType;
+            if constexpr ( Detail::HasValidateMember<T>::Value )
+            {
+                return MayThrow( [ & ]() { return data.Validate( value ); } );
+            }
+            else
+            {
+                return value->GetDataAsPointerTo<T>() ? Status::kOk : Status::kInvalidValueType;
+            }
         }
 
         template <class T>
         Status Deserialize( const Value* value, T& data ) noexcept
         {
-            const T* valueData = value->GetDataAsPointerTo<T>();
-
-            if ( !valueData )
+            if ( !value )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
-                [ & ]()
+            if constexpr ( Detail::HasDeserializeMember<T>::Value )
+            {
+                return MayThrow( [ & ]() { return data.Deserialize( value ); } );
+            }
+            else
+            {
+                const T* valueData = value->GetDataAsPointerTo<T>();
+
+                if ( !valueData )
                 {
-                    if constexpr ( Detail::HasDeserializeMember<T>::Value )
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
                     {
-                        return data.Deserialize( value );
-                    }
-                    else
-                    {
-                        data = *valueData;
+                        T copy( *valueData );
+                        data = static_cast<T&&>( copy );
+
                         return Status::kOk;
-                    }
-                } );
+                    } );
+            }
         }
 
         template <class T>
         Status Serialize( Value* value, const T& data ) noexcept
         {
-            T* valueData = value->GetDataAsPointerTo<T>();
-
-            if ( !valueData )
+            if ( !value )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
-                [ & ]()
+            if constexpr ( Detail::HasSerializeMember<T>::Value )
+            {
+                return MayThrow( [ & ]() { return data.Serialize( value ); } );
+            }
+            else
+            {
+                T* valueData = value->GetDataAsPointerTo<T>();
+
+                if ( !valueData )
                 {
-                    if constexpr ( Detail::HasSerializeMember<T>::Value )
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
                     {
-                        return data.Serialize( value );
-                    }
-                    else
-                    {
-                        *valueData = data;
+                        T copy( data );
+                        *valueData = static_cast<T&&>( copy );
 
                         return Status::kOk;
-                    }
-                } );
+                    } );
+            }
         }
 
         template <class T>
         Status Validate( const Value* value, const Array<T>& /*data*/ ) noexcept
         {
-            const Array<Value*>* valueData = value->GetDataAsPointerTo<Array<Value*>>();
+            const Array<Value*>* valueData = value ? value->GetDataAsPointerTo<Array<Value*>>() : nullptr;
 
             if ( !valueData )
             {
@@ -814,7 +937,7 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    const T temp {};
+                    const T temp = T();
 
                     Status status;
 
@@ -843,58 +966,65 @@ namespace C4
         template <class T>
         Status Deserialize( const Value* value, Array<T>& data ) noexcept
         {
-            const Array<Value*>* valueData = value->GetDataAsPointerTo<Array<Value*>>();
+            const Array<Value*>* valueData = value ? value->GetDataAsPointerTo<Array<Value*>>() : nullptr;
 
             if ( !valueData )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
+            Status status = MayThrow(
                 [ & ]()
                 {
                     data.PurgeArray();
                     data.ReserveArrayElementCount( valueData->GetArrayElementCount() );
 
-                    Status status;
+                    Status elementStatus;
 
                     for ( Value* valueElement : *valueData )
                     {
                         T temp;
                         if constexpr ( Detail::HasDeserializeMember<T>::Value )
                         {
-                            status = temp.Deserialize( valueElement );
+                            elementStatus = temp.Deserialize( valueElement );
                         }
                         else
                         {
-                            status = Deserialize( valueElement, temp );
+                            elementStatus = Deserialize( valueElement, temp );
                         }
 
-                        if ( status == Status::kOk )
+                        if ( elementStatus == Status::kOk )
                         {
-                            data.AppendArrayElement( ( temp ) );
+                            data.AppendArrayElement( static_cast<T&&>( temp ) );
                         }
                         else
                         {
-                            return status;
+                            return elementStatus;
                         }
                     }
 
                     return Status::kOk;
                 } );
+
+            if ( status != Status::kOk )
+            {
+                data.PurgeArray();
+            }
+
+            return status;
         }
 
         template <class T>
         Status Serialize( Value* value, const Array<T>& data ) noexcept
         {
-            Array<Value*>* valueData = value->GetDataAsPointerTo<Array<Value*>>();
+            Array<Value*>* valueData = value ? value->GetDataAsPointerTo<Array<Value*>>() : nullptr;
 
             if ( !valueData )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
+            Status status = MayThrow(
                 [ & ]()
                 {
                     Detail::PurgePointerArray( *valueData );
@@ -902,46 +1032,45 @@ namespace C4
 
                     for ( const T& element : data )
                     {
-                        Value* value = nullptr;
+                        Value* elementValue = nullptr;
 
-                        Status status = MayThrow(
+                        Status elementStatus = MayThrow(
                             [ & ]()
                             {
-                                value = Detail::CreateValueFor( element );
-                                return Status::kOk;
+                                elementValue = Detail::CreateValueFor( element );
+
+                                Status serializeStatus = Serialize( elementValue, element );
+
+                                if ( serializeStatus == Status::kOk )
+                                {
+                                    valueData->AppendArrayElement( elementValue );
+                                }
+
+                                return serializeStatus;
                             } );
 
-                        if ( status != Status::kOk )
+                        if ( elementStatus != Status::kOk )
                         {
-                            return status;
+                            delete elementValue;
+                            return elementStatus;
                         }
-
-                        if constexpr ( Detail::HasSerializeMember<T>::Value )
-                        {
-                            status = element.Serialize( value );
-                        }
-                        else
-                        {
-                            status = Serialize( value, element );
-                        }
-
-                        if ( status != Status::kOk )
-                        {
-                            delete value;
-                            return status;
-                        }
-
-                        valueData->AppendArrayElement( value );
                     }
 
                     return Status::kOk;
                 } );
+
+            if ( status == Status::kException )
+            {
+                Detail::PurgePointerArray( *valueData );
+            }
+
+            return status;
         }
 
         template <class T>
         Status Validate( const Value* value, const ObjectMap<T>& /*data*/ ) noexcept
         {
-            const ObjectValue* objectValue = value->AsJsonObjectValue();
+            const ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
@@ -951,8 +1080,8 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    Status status;
-                    T      temp;
+                    Status  status;
+                    const T temp = T();
 
                     for ( const auto* objectValueMapElement : *objectValue )
                     {
@@ -977,89 +1106,66 @@ namespace C4
         template <class T>
         Status Deserialize( const Value* value, ObjectMap<T>& data ) noexcept
         {
-            const ObjectValue* objectValue = value->AsJsonObjectValue();
+            const ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
+            Status result = MayThrow(
                 [ & ]()
                 {
                     using DataMapElementType = typename ObjectMap<T>::ElementType;
+
+                    data.PurgeMap();
 
                     Status status;
 
                     for ( const auto* objectValueMapElement : *objectValue )
                     {
-                        const auto& key = objectValueMapElement->GetKey();
+                        DataMapElementType* dataMapElement = nullptr;
 
-                        DataMapElementType* dataMapElement = data.FindMapElement( key );
-
-                        const bool addedNew = ( dataMapElement == nullptr );
-
-                        if ( addedNew )
-                        {
-                            status = MayThrow(
-                                [ & ]()
-                                {
-                                    dataMapElement = new DataMapElementType;
-                                    return Status::kOk;
-                                } );
-
-                            if ( status != Status::kOk )
+                        status = MayThrow(
+                            [ & ]()
                             {
-                                return status;
-                            }
+                                dataMapElement       = new DataMapElementType;
+                                dataMapElement->name = objectValueMapElement->GetKey();
 
-                            dataMapElement->name = key;
-                        }
-
-                        if constexpr ( Detail::HasDeserializeMember<T>::Value )
-                        {
-                            status = dataMapElement->data.Deserialize( objectValueMapElement );
-                        }
-                        else
-                        {
-                            status = Deserialize( objectValueMapElement, dataMapElement->data );
-                        }
+                                if constexpr ( Detail::HasDeserializeMember<T>::Value )
+                                {
+                                    return dataMapElement->data.Deserialize( objectValueMapElement );
+                                }
+                                else
+                                {
+                                    return Deserialize( objectValueMapElement, dataMapElement->data );
+                                }
+                            } );
 
                         if ( status != Status::kOk )
                         {
-                            if ( addedNew )
-                            {
-                                delete dataMapElement;
-                            }
-
+                            delete dataMapElement;
                             return status;
                         }
 
-                        if ( addedNew )
-                        {
-                            status = MayThrow(
-                                [ & ]()
-                                {
-                                    data.InsertMapElement( dataMapElement );
-                                    return Status::kOk;
-                                } );
-
-                            if ( status != Status::kOk )
-                            {
-                                delete dataMapElement;
-                                return status;
-                            }
-                        }
+                        data.InsertMapElement( dataMapElement );
                     }
 
                     return Status::kOk;
                 } );
+
+            if ( result != Status::kOk )
+            {
+                data.PurgeMap();
+            }
+
+            return result;
         }
 
         template <class T>
         Status Serialize( Value* value, const ObjectMap<T>& data ) noexcept
         {
-            ObjectValue* objectValue = value->AsJsonObjectValue();
+            ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
@@ -1069,33 +1175,35 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    objectValue->RemoveAllMapElements();
-
-                    T      temp;
-                    Status status;
+                    objectValue->PurgeAccountedMap();
 
                     for ( const auto* dataMapElement : data )
                     {
-                        Value* elem = Detail::CreateValueFor( temp );
-                        elem->name  = dataMapElement->name;
+                        Value* elem = nullptr;
 
-                        if constexpr ( Detail::HasSerializeMember<T>::Value )
-                        {
-                            status = dataMapElement->data.Serialize( elem );
-                        }
-                        else
-                        {
-                            status = Serialize( elem, dataMapElement->data );
-                        }
+                        Status status = MayThrow(
+                            [ & ]()
+                            {
+                                elem       = Detail::CreateValueFor( dataMapElement->data );
+                                elem->name = dataMapElement->name;
+
+                                Status serializeStatus = Serialize( elem, dataMapElement->data );
+
+                                if ( serializeStatus == Status::kOk && !objectValue->InsertAccountedMapElement( elem ) )
+                                {
+                                    serializeStatus = Status::kDuplicateName;
+                                }
+
+                                return serializeStatus;
+                            } );
 
                         if ( status != Status::kOk )
                         {
                             delete elem;
                             return status;
                         }
-
-                        objectValue->InsertMapElement( elem );
                     }
+
                     return Status::kOk;
                 } );
         }
@@ -1120,7 +1228,7 @@ namespace C4
         template <class T>
         Status Validate( const Value* value, const std::vector<T>& /*data*/ ) noexcept
         {
-            const Array<Value*>* valueData = value->GetDataAsPointerTo<Array<Value*>>();
+            const Array<Value*>* valueData = value ? value->GetDataAsPointerTo<Array<Value*>>() : nullptr;
 
             if ( !valueData )
             {
@@ -1130,7 +1238,7 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    const T temp {};
+                    const T temp = T();
                     Status  status;
 
                     for ( Value* value : *valueData )
@@ -1157,14 +1265,14 @@ namespace C4
         template <class T>
         Status Deserialize( const Value* value, std::vector<T>& data ) noexcept
         {
-            const Array<Value*>* valueData = value->GetDataAsPointerTo<Array<Value*>>();
+            const Array<Value*>* valueData = value ? value->GetDataAsPointerTo<Array<Value*>>() : nullptr;
 
             if ( !valueData )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
+            Status result = MayThrow(
                 [ & ]()
                 {
                     data.clear();
@@ -1183,7 +1291,7 @@ namespace C4
 
                         if constexpr ( Detail::HasDeserializeMember<T>::Value )
                         {
-                            status = temp->Deserialize( value );
+                            status = temp.Deserialize( value );
                         }
                         else
                         {
@@ -1202,19 +1310,26 @@ namespace C4
 
                     return Status::kOk;
                 } );
+
+            if ( result != Status::kOk )
+            {
+                data.clear();
+            }
+
+            return result;
         }
 
         template <class T>
         Status Serialize( Value* value, const std::vector<T>& data ) noexcept
         {
-            Array<Value*>* valueData = value->GetDataAsPointerTo<Array<Value*>>();
+            Array<Value*>* valueData = value ? value->GetDataAsPointerTo<Array<Value*>>() : nullptr;
 
             if ( !valueData )
             {
                 return Status::kInvalidValueType;
             }
 
-            return MayThrow(
+            Status status = MayThrow(
                 [ & ]()
                 {
                     Detail::PurgePointerArray( *valueData );
@@ -1222,45 +1337,45 @@ namespace C4
 
                     for ( const T& element : data )
                     {
-                        Value* value = nullptr;
+                        Value* elementValue = nullptr;
 
-                        Status status = MayThrow(
+                        Status elementStatus = MayThrow(
                             [ & ]()
                             {
-                                value = Detail::CreateValueFor( element );
-                                return Status::kOk;
+                                elementValue = Detail::CreateValueFor( element );
+
+                                Status serializeStatus = Serialize( elementValue, element );
+
+                                if ( serializeStatus == Status::kOk )
+                                {
+                                    valueData->AppendArrayElement( elementValue );
+                                }
+
+                                return serializeStatus;
                             } );
 
-                        if ( status != Status::kOk )
+                        if ( elementStatus != Status::kOk )
                         {
-                            return status;
-                        }
-
-                        valueData->AppendArrayElement( value );
-
-                        if constexpr ( Detail::HasSerializeMember<T>::Value )
-                        {
-                            status = element.Serialize( value );
-                        }
-                        else
-                        {
-                            status = Serialize( value, element );
-                        }
-
-                        if ( status != Status::kOk )
-                        {
-                            return status;
+                            delete elementValue;
+                            return elementStatus;
                         }
                     }
 
                     return Status::kOk;
                 } );
+
+            if ( status == Status::kException )
+            {
+                Detail::PurgePointerArray( *valueData );
+            }
+
+            return status;
         }
 
         template <class T>
         Status Validate( const Value* value, const std::map<std::string, T>& /*data*/ ) noexcept
         {
-            const ObjectValue* objectValue = value->AsJsonObjectValue();
+            const ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
@@ -1270,8 +1385,8 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    T      temp;
-                    Status status;
+                    const T temp = T();
+                    Status  status;
 
                     for ( const auto* objectValueMapElement : *objectValue )
                     {
@@ -1297,7 +1412,7 @@ namespace C4
         template <class T>
         Status Deserialize( const Value* value, std::map<std::string, T>& data ) noexcept
         {
-            const ObjectValue* objectValue = value->AsJsonObjectValue();
+            const ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
@@ -1307,11 +1422,12 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    Status status;
+                    std::map<std::string, T> result;
+                    Status                   status;
 
                     for ( const auto* objectValueMapElement : *objectValue )
                     {
-                        T& dataMapElementData = data[ static_cast<const char*>( objectValueMapElement->GetKey() ) ];
+                        T& dataMapElementData = result[ static_cast<const char*>( objectValueMapElement->GetKey() ) ];
 
                         if constexpr ( Detail::HasDeserializeMember<T>::Value )
                         {
@@ -1328,6 +1444,8 @@ namespace C4
                         }
                     }
 
+                    data.swap( result );
+
                     return Status::kOk;
                 } );
         }
@@ -1335,7 +1453,7 @@ namespace C4
         template <class T>
         Status Serialize( Value* value, const std::map<std::string, T>& data ) noexcept
         {
-            ObjectValue* objectValue = value->AsJsonObjectValue();
+            ObjectValue* objectValue = value ? value->AsJsonObjectValue() : nullptr;
 
             if ( !objectValue )
             {
@@ -1345,32 +1463,33 @@ namespace C4
             return MayThrow(
                 [ & ]()
                 {
-                    objectValue->RemoveAllMapElements();
+                    objectValue->PurgeAccountedMap();
 
-                    T      temp;
-                    Status status;
-
-                    for ( auto const& [ dataMapElementKey, dataMapElementData ] : data )
+                    for ( auto const& dataMapElement : data )
                     {
-                        Value* elem = Detail::CreateValueFor( temp );
-                        elem->name  = dataMapElementKey.c_str();
+                        Value* elem = nullptr;
 
-                        if constexpr ( Detail::HasSerializeMember<T>::Value )
-                        {
-                            status = dataMapElementData.Serialize( elem );
-                        }
-                        else
-                        {
-                            status = Serialize( elem, dataMapElementData );
-                        }
+                        Status status = MayThrow(
+                            [ & ]()
+                            {
+                                elem       = Detail::CreateValueFor( dataMapElement.second );
+                                elem->name = dataMapElement.first.c_str();
+
+                                Status serializeStatus = Serialize( elem, dataMapElement.second );
+
+                                if ( serializeStatus == Status::kOk && !objectValue->InsertAccountedMapElement( elem ) )
+                                {
+                                    serializeStatus = Status::kDuplicateName;
+                                }
+
+                                return serializeStatus;
+                            } );
 
                         if ( status != Status::kOk )
                         {
                             delete elem;
                             return status;
                         }
-
-                        objectValue->InsertMapElement( elem );
                     }
 
                     return Status::kOk;

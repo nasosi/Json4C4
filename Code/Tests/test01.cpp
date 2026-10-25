@@ -1,6 +1,10 @@
 #include <Json4C4/C4Json.h>
 
+#include <cstdio>
+
 namespace Json = C4::Json;
+
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
 
 struct TestFile01
 {
@@ -64,3 +68,12 @@ int main()
 
     return 0;
 }
+
+#else
+
+int main()
+{
+    return 77;
+}
+
+#endif
