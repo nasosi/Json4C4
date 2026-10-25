@@ -10,7 +10,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v1.1.1
+  GIT_TAG v2.0.0
 )
 
 FetchContent_MakeAvailable( Json4C4 )
