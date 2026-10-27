@@ -7,8 +7,8 @@
 #define NUMBERTEXT_H
 
 #define NUMBERTEXT_VERSION_MAJOR 0
-#define NUMBERTEXT_VERSION_MINOR 5
-#define NUMBERTEXT_VERSION_PATCH 1
+#define NUMBERTEXT_VERSION_MINOR 8
+#define NUMBERTEXT_VERSION_PATCH 0
 
 #define NUMBERTEXT_F64_MAX_CHARS 32
 #define NUMBERTEXT_F32_MAX_CHARS 24
@@ -45,9 +45,9 @@ static inline nt_i32    nt_write_u64( nt_u64 value, char* output );
 static inline nt_i32    nt_write_i32( nt_i32 value, char* output );
 static inline nt_i32    nt_write_i64( nt_i64 value, char* output );
 
-#if !defined( NUMBERTEXT_PORTABLE_MULTIPLY ) && defined( _MSC_VER ) && ( defined( _M_X64 ) || defined( _M_ARM64 ) )
+#if !defined( NUMBERTEXT_NO_INTRINSICS ) && defined( _MSC_VER ) && ( defined( _M_X64 ) || defined( _M_ARM64 ) )
 
-#    define NUMBERTEXT_DETAIL_MULTIPLY_HIGH
+#    define NUMBERTEXT_DETAIL_MSVC_INTRINSICS
 
 #    ifdef __cplusplus
 #        define NUMBERTEXT_DETAIL_EXTERN_C extern "C"
@@ -55,22 +55,38 @@ static inline nt_i32    nt_write_i64( nt_i64 value, char* output );
 #        define NUMBERTEXT_DETAIL_EXTERN_C
 #    endif
 
-NUMBERTEXT_DETAIL_EXTERN_C unsigned __int64 __umulh( unsigned __int64 a, unsigned __int64 b );
-#    pragma intrinsic( __umulh )
+NUMBERTEXT_DETAIL_EXTERN_C nt_u64        __umulh( nt_u64 a, nt_u64 b );
+NUMBERTEXT_DETAIL_EXTERN_C unsigned char _BitScanReverse64( unsigned long* index, nt_u64 mask );
+NUMBERTEXT_DETAIL_EXTERN_C void* __cdecl memcpy( void* destination, const void* source, nt_u64 size );
+#    pragma intrinsic( __umulh, _BitScanReverse64, memcpy )
 
-#elif !defined( NUMBERTEXT_PORTABLE_MULTIPLY ) && defined( __SIZEOF_INT128__ )
+#elif !defined( NUMBERTEXT_NO_INTRINSICS ) && defined( __SIZEOF_INT128__ )
 
-#    define NUMBERTEXT_DETAIL_INT128
+#    define NUMBERTEXT_DETAIL_GNU_INTRINSICS
 
 __extension__ typedef unsigned __int128 nt_detail_u128;
 
 #endif
 
-/* The fast reader takes the float format as a parameter; inlining it into each caller makes the format constant. */
-#if defined( _MSC_VER )
-#    define NUMBERTEXT_DETAIL_FORCE_INLINE static __forceinline
-#elif defined( __GNUC__ )
+/* SSE2, on every x86-64 processor, and NEON, on every ARM64 one, write sixteen digits at once. Their headers, the only
+   ones NumberText includes, bring in parts of the C library; NUMBERTEXT_NO_SIMD and freestanding builds leave them out.
+   ARM64EC, which defines _M_X64 but not _M_ARM64, would only emulate SSE2 and takes neither. */
+#if !defined( NUMBERTEXT_NO_SIMD ) && !defined( NUMBERTEXT_NO_INTRINSICS ) && ( !defined( __STDC_HOSTED__ ) || __STDC_HOSTED__ )
+#    if ( defined( _M_X64 ) && !defined( _M_ARM64EC ) ) || ( defined( _M_IX86_FP ) && _M_IX86_FP >= 2 ) || defined( __SSE2__ )
+#        include <emmintrin.h>
+#        define NUMBERTEXT_DETAIL_SSE2
+#    elif defined( _M_ARM64 ) || ( defined( __aarch64__ ) && defined( __ARM_NEON ) && !defined( __ARM_BIG_ENDIAN ) )
+#        include <arm_neon.h>
+#        define NUMBERTEXT_DETAIL_NEON
+#    endif
+#endif
+
+/* For functions on every number's path: the reader and writer take the float format as a parameter, which inlining
+   makes constant, and MSVC doesn't inline the small digit writers on its own. */
+#if defined( __GNUC__ ) || defined( __clang__ )
 #    define NUMBERTEXT_DETAIL_FORCE_INLINE static inline __attribute__( ( always_inline ) )
+#elif defined( _MSC_VER )
+#    define NUMBERTEXT_DETAIL_FORCE_INLINE static __forceinline
 #else
 #    define NUMBERTEXT_DETAIL_FORCE_INLINE static inline
 #endif
@@ -85,16 +101,13 @@ __extension__ typedef unsigned __int128 nt_detail_u128;
 #define NUMBERTEXT_DETAIL_SIGNIFICAND_BIAS 1075
 #define NUMBERTEXT_DETAIL_INFINITE_EXPONENT 0x7FF
 #define NUMBERTEXT_DETAIL_MINIMUM_EXPONENT ( -1074 )
-#define NUMBERTEXT_DETAIL_MAXIMUM_PRECISION 17
 
 #define NUMBERTEXT_DETAIL_MINIMUM_POWER_OF_FIVE ( -342 )
-#define NUMBERTEXT_DETAIL_MAXIMUM_POWER_OF_FIVE 324
+#define NUMBERTEXT_DETAIL_MAXIMUM_POWER_OF_FIVE 326
 #define NUMBERTEXT_DETAIL_FAST_DIGITS 19
 #define NUMBERTEXT_DETAIL_EXACT_DIGITS 800
 #define NUMBERTEXT_DETAIL_EXPONENT_LIMIT 1000000000000LL
 #define NUMBERTEXT_DETAIL_BIG_WORDS 136
-#define NUMBERTEXT_DETAIL_F32_EXACT_DIGITS 120
-#define NUMBERTEXT_DETAIL_F32_MAXIMUM_PRECISION 9
 
 typedef struct nt_detail_wide
 {
@@ -126,11 +139,12 @@ typedef struct nt_detail_format
     nt_i32 evenRoundingMaximum;
     nt_i32 overflowMagnitude;
     nt_i32 underflowMagnitude;
+    nt_i32 shortestDigits;
 } nt_detail_format;
 
 static inline const nt_u64* nt_detail_power_of_five_128( void )
 {
-    /* 5^q for q from -342 to 324 as 128-bit (high, low) values normalized to [2^127, 2^128): rounded up for q from -27 to -1, truncated otherwise. */
+    /* 5^q for q from -342 to 326 as 128-bit (high, low) values normalized to [2^127, 2^128): rounded up for q from -27 to -1, truncated otherwise. */
     static const nt_u64 table[ ( NUMBERTEXT_DETAIL_MAXIMUM_POWER_OF_FIVE - NUMBERTEXT_DETAIL_MINIMUM_POWER_OF_FIVE + 1 ) * 2 ] = {
         0xEEF453D6923BD65AULL, 0x113FAA2906A13B3FULL, 0x9558B4661B6565F8ULL, 0x4AC7CA59A424C507ULL, 0xBAAEE17FA23EBF76ULL, 0x5D79BCF00D2DF649ULL,
         0xE95A99DF8ACE6F53ULL, 0xF4D82C2C107973DCULL, 0x91D8A02BB6C10594ULL, 0x79071B9B8A4BE869ULL, 0xB64EC836A47146F9ULL, 0x9748E2826CDEE284ULL,
@@ -354,16 +368,9 @@ static inline const nt_u64* nt_detail_power_of_five_128( void )
         0xA9C2794AE3A3C69AULL, 0xB2EB3875504DDB22ULL, 0xD433179D9C8CB841ULL, 0x5FA60692A46151EBULL, 0x849FEEC281D7F328ULL, 0xDBC7C41BA6BCD333ULL,
         0xA5C7EA73224DEFF3ULL, 0x12B9B522906C0800ULL, 0xCF39E50FEAE16BEFULL, 0xD768226B34870A00ULL, 0x81842F29F2CCE375ULL, 0xE6A1158300D46640ULL,
         0xA1E53AF46F801C53ULL, 0x60495AE3C1097FD0ULL, 0xCA5E89B18B602368ULL, 0x385BB19CB14BDFC4ULL, 0xFCF62C1DEE382C42ULL, 0x46729E03DD9ED7B5ULL,
-        0x9E19DB92B4E31BA9ULL, 0x6C07A2C26A8346D1ULL };
+        0x9E19DB92B4E31BA9ULL, 0x6C07A2C26A8346D1ULL, 0xC5A05277621BE293ULL, 0xC7098B7305241885ULL, 0xF70867153AA2DB38ULL, 0xB8CBEE4FC66D1EA7ULL };
 
     return table;
-}
-
-/* Eisel-Lemire reading needs the table entries as they are; Schubfach writing needs each entry to be the truncated
-   value plus one, so it adds one to the entries this returns true for. */
-static inline int nt_detail_power_of_five_is_truncated( nt_i32 power )
-{
-    return power < -27 || power >= 0;
 }
 
 static inline int nt_detail_is_digit( char c )
@@ -385,12 +392,12 @@ static inline nt_detail_wide nt_detail_multiply64( nt_u64 a, nt_u64 b )
 {
     nt_detail_wide result;
 
-#if defined( NUMBERTEXT_DETAIL_MULTIPLY_HIGH )
+#if defined( NUMBERTEXT_DETAIL_MSVC_INTRINSICS )
 
     result.low  = a * b;
     result.high = __umulh( a, b );
 
-#elif defined( NUMBERTEXT_DETAIL_INT128 )
+#elif defined( NUMBERTEXT_DETAIL_GNU_INTRINSICS )
 
     nt_detail_u128 product = (nt_detail_u128)a * b;
 
@@ -417,8 +424,23 @@ static inline nt_detail_wide nt_detail_multiply64( nt_u64 a, nt_u64 b )
     return result;
 }
 
+/* value is not zero. */
 static inline nt_i32 nt_detail_count_leading_zeros( nt_u64 value )
 {
+#if defined( NUMBERTEXT_DETAIL_MSVC_INTRINSICS )
+
+    unsigned long index;
+
+    _BitScanReverse64( &index, value );
+
+    return 63 - (nt_i32)index;
+
+#elif defined( NUMBERTEXT_DETAIL_GNU_INTRINSICS )
+
+    return __builtin_clzll( value );
+
+#else
+
     nt_i32 count = 0;
     nt_i32 step;
 
@@ -432,6 +454,8 @@ static inline nt_i32 nt_detail_count_leading_zeros( nt_u64 value )
     }
 
     return count;
+
+#endif
 }
 
 static inline nt_i32 nt_detail_floor_shift_right( nt_i32 value, nt_i32 shift )
@@ -449,32 +473,51 @@ static inline nt_i32 nt_detail_floor_log10_pow2( nt_i32 exponent )
     return nt_detail_floor_shift_right( exponent * 1262611, 22 );
 }
 
-static inline nt_u64 nt_detail_f64_bits( double value )
+static inline nt_i32 nt_detail_floor_log10_three_quarters_pow2( nt_i32 exponent )
 {
-    nt_u64       bits;
-    const nt_u8* source      = (const nt_u8*)&value;
-    nt_u8*       destination = (nt_u8*)&bits;
+    return nt_detail_floor_shift_right( exponent * 1262611 - 524072, 22 );
+}
+
+/* Copies the bytes of a float or an integer of the same size. The compiler's own memcpy makes this one move; MSVC turns
+   the byte loop into one store per byte and a wide load that has to wait for them all. */
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_copy_bytes( void* destination, const void* source, nt_i32 size )
+{
+#if defined( NUMBERTEXT_DETAIL_MSVC_INTRINSICS )
+
+    memcpy( destination, source, (nt_u64)size );
+
+#elif !defined( NUMBERTEXT_NO_INTRINSICS ) && ( defined( __GNUC__ ) || defined( __clang__ ) )
+
+    __builtin_memcpy( destination, source, (__SIZE_TYPE__)size );
+
+#else
+
+    const nt_u8* from = (const nt_u8*)source;
+    nt_u8*       to   = (nt_u8*)destination;
     nt_i32       a;
 
-    for ( a = 0; a < 8; a++ )
+    for ( a = 0; a < size; a++ )
     {
-        destination[ a ] = source[ a ];
+        to[ a ] = from[ a ];
     }
+
+#endif
+}
+
+static inline nt_u64 nt_detail_f64_bits( double value )
+{
+    nt_u64 bits;
+
+    nt_detail_copy_bytes( &bits, &value, 8 );
 
     return bits;
 }
 
 static inline double nt_detail_f64_from_bits( nt_u64 bits )
 {
-    double       value;
-    const nt_u8* source      = (const nt_u8*)&bits;
-    nt_u8*       destination = (nt_u8*)&value;
-    nt_i32       a;
+    double value;
 
-    for ( a = 0; a < 8; a++ )
-    {
-        destination[ a ] = source[ a ];
-    }
+    nt_detail_copy_bytes( &value, &bits, 8 );
 
     return value;
 }
@@ -486,44 +529,32 @@ static inline int nt_detail_is_finite( nt_u64 bits )
 
 static inline nt_u32 nt_detail_f32_bits( float value )
 {
-    nt_u32       bits;
-    const nt_u8* source      = (const nt_u8*)&value;
-    nt_u8*       destination = (nt_u8*)&bits;
-    nt_i32       a;
+    nt_u32 bits;
 
-    for ( a = 0; a < 4; a++ )
-    {
-        destination[ a ] = source[ a ];
-    }
+    nt_detail_copy_bytes( &bits, &value, 4 );
 
     return bits;
 }
 
 static inline float nt_detail_f32_from_bits( nt_u32 bits )
 {
-    float        value;
-    const nt_u8* source      = (const nt_u8*)&bits;
-    nt_u8*       destination = (nt_u8*)&value;
-    nt_i32       a;
+    float value;
 
-    for ( a = 0; a < 4; a++ )
-    {
-        destination[ a ] = source[ a ];
-    }
+    nt_detail_copy_bytes( &value, &bits, 4 );
 
     return value;
 }
 
 static inline nt_detail_format nt_detail_f64_format( void )
 {
-    nt_detail_format format = { 52, 1023, -4, 23, 309, -330 };
+    nt_detail_format format = { 52, 1023, -4, 23, 309, -330, 17 };
 
     return format;
 }
 
 static inline nt_detail_format nt_detail_f32_format( void )
 {
-    nt_detail_format format = { 23, 127, -17, 10, 39, -51 };
+    nt_detail_format format = { 23, 127, -17, 10, 39, -51, 9 };
 
     return format;
 }
@@ -619,24 +650,6 @@ static inline void nt_detail_big_multiply_add( nt_detail_big* big, nt_u32 factor
 {
     nt_detail_big_multiply( big, factor );
     nt_detail_big_add_small( big, value );
-}
-
-static inline nt_u32 nt_detail_big_divide_small( nt_detail_big* big, nt_u32 divisor )
-{
-    nt_u64 remainder = 0;
-    nt_i32 a;
-
-    for ( a = big->count - 1; a >= 0; a-- )
-    {
-        nt_u64 current = ( remainder << 32 ) | big->word[ a ];
-
-        big->word[ a ] = (nt_u32)( current / divisor );
-        remainder      = current % divisor;
-    }
-
-    nt_detail_big_trim( big );
-
-    return (nt_u32)remainder;
 }
 
 static inline void nt_detail_big_multiply_power2( nt_detail_big* big, nt_i32 exponent )
@@ -796,36 +809,6 @@ static inline nt_u64 nt_detail_big_bits( const nt_detail_big* big, nt_i32 index,
     }
 
     return result;
-}
-
-static inline nt_i32 nt_detail_big_to_decimal( nt_detail_big* big, char* digits )
-{
-    char   reversed[ 1200 ];
-    nt_i32 count = 0;
-    nt_i32 a;
-
-    while ( big->count != 0 )
-    {
-        nt_u32 chunk = nt_detail_big_divide_small( big, 1000000000U );
-
-        for ( a = 0; a < 9; a++ )
-        {
-            reversed[ count++ ] = (char)( '0' + chunk % 10 );
-            chunk /= 10;
-        }
-    }
-
-    while ( count > 1 && reversed[ count - 1 ] == '0' )
-    {
-        count--;
-    }
-
-    for ( a = 0; a < count; a++ )
-    {
-        digits[ a ] = reversed[ count - 1 - a ];
-    }
-
-    return count;
 }
 
 NUMBERTEXT_DETAIL_FORCE_INLINE int nt_detail_read_fast( nt_detail_format format, int negative, nt_u64 significand, nt_i64 decimalExponent, nt_u64* bits )
@@ -1353,329 +1336,164 @@ static inline nt_status nt_decimal_to_f32( const nt_decimal* decimal, float* val
     return status;
 }
 
-static inline char* nt_detail_write_layout( const char* digits, nt_i32 digitCount, nt_i32 pointPosition, char* output )
+/* 10^power as a 128-bit value normalized to [2^127, 2^128), rounded up: the table entries are exact for power from 0 to
+   55, rounded up from -27 to -1 and truncated otherwise. */
+static inline nt_detail_wide nt_detail_power_of_ten_rounded_up( nt_i32 power )
 {
-    nt_i32 exponent10 = pointPosition - 1;
-    nt_i32 a;
+    const nt_u64*  entry = nt_detail_power_of_five_128() + 2 * ( power - NUMBERTEXT_DETAIL_MINIMUM_POWER_OF_FIVE );
+    nt_detail_wide result;
 
-    if ( exponent10 >= -6 && exponent10 < 21 )
-    {
-        if ( pointPosition <= 0 )
-        {
-            *output++ = '0';
-            *output++ = '.';
+    result.low  = entry[ 1 ] + ( ( power < -27 || power > 55 ) ? 1 : 0 );
+    result.high = entry[ 0 ] + ( ( result.low < entry[ 1 ] ) ? 1 : 0 );
 
-            for ( a = 0; a < -pointPosition; a++ )
-            {
-                *output++ = '0';
-            }
-
-            for ( a = 0; a < digitCount; a++ )
-            {
-                *output++ = digits[ a ];
-            }
-        }
-        else
-        {
-            for ( a = 0; a < digitCount || a < pointPosition; a++ )
-            {
-                if ( a == pointPosition )
-                {
-                    *output++ = '.';
-                }
-
-                *output++ = ( a < digitCount ) ? digits[ a ] : '0';
-            }
-        }
-    }
-    else
-    {
-        nt_i32 magnitude = ( exponent10 < 0 ) ? -exponent10 : exponent10;
-        char   exponentDigits[ 4 ];
-        nt_i32 exponentLength = 0;
-
-        *output++ = digits[ 0 ];
-
-        if ( digitCount > 1 )
-        {
-            *output++ = '.';
-
-            for ( a = 1; a < digitCount; a++ )
-            {
-                *output++ = digits[ a ];
-            }
-        }
-
-        *output++ = 'e';
-        *output++ = ( exponent10 < 0 ) ? '-' : '+';
-
-        do
-        {
-            exponentDigits[ exponentLength++ ] = (char)( '0' + magnitude % 10 );
-            magnitude /= 10;
-        } while ( magnitude != 0 );
-
-        while ( exponentLength > 0 )
-        {
-            *output++ = exponentDigits[ --exponentLength ];
-        }
-    }
-
-    *output = 0;
-
-    return output;
+    return result;
 }
 
-static inline nt_i32 nt_detail_compare_decimal( const char* a, nt_i32 aLength, const char* b, nt_i32 bLength )
+/* The top 128 bits of the 192-bit product of value and power. */
+static inline nt_detail_wide nt_detail_multiply_upper( nt_u64 value, nt_detail_wide power )
 {
-    nt_i32 i;
+    nt_detail_wide high = nt_detail_multiply64( value, power.high );
+    nt_detail_wide low  = nt_detail_multiply64( value, power.low );
 
-    if ( aLength != bLength )
-    {
-        return ( aLength < bLength ) ? -1 : 1;
-    }
+    high.low += low.high;
+    high.high += ( high.low < low.high ) ? 1 : 0;
 
-    for ( i = 0; i < aLength; i++ )
-    {
-        if ( a[ i ] != b[ i ] )
-        {
-            return ( a[ i ] < b[ i ] ) ? -1 : 1;
-        }
-    }
-
-    return 0;
+    return high;
 }
 
-static inline nt_i32 nt_detail_round_to_precision( const char* digits, nt_i32 length, nt_i32 precision, char* rounded, nt_i32* roundedLength )
+/* Whether the integer part of value x power / 2^(128 - beta) is odd, and whether that product is a whole number. */
+static inline int nt_detail_product_parity( nt_u64 value, nt_detail_wide power, nt_i32 beta, int* isInteger )
 {
-    nt_i32 kept    = nt_detail_min( precision, length );
-    int    roundUp = 0;
-    int    carried;
-    nt_i32 a;
+    nt_detail_wide product = nt_detail_multiply64( value, power.low );
 
-    for ( a = 0; a < kept; a++ )
-    {
-        rounded[ a + 1 ] = digits[ a ];
-    }
+    product.high += value * power.high;
+    *isInteger = ( ( product.high << beta ) | ( product.low >> ( 64 - beta ) ) ) == 0;
 
-    if ( kept < length )
-    {
-        if ( digits[ kept ] > '5' )
-        {
-            roundUp = 1;
-        }
-        else if ( digits[ kept ] == '5' )
-        {
-            int tail = 0;
-
-            for ( a = kept + 1; a < length; a++ )
-            {
-                tail |= ( digits[ a ] != '0' );
-            }
-
-            roundUp = tail || ( ( digits[ kept - 1 ] - '0' ) & 1 );
-        }
-    }
-
-    rounded[ 0 ] = '0';
-
-    if ( roundUp )
-    {
-        for ( a = kept; rounded[ a ] == '9'; a-- )
-        {
-            rounded[ a ] = '0';
-        }
-
-        rounded[ a ]++;
-    }
-
-    carried        = ( rounded[ 0 ] != '0' );
-    *roundedLength = length + carried;
-
-    if ( !carried )
-    {
-        for ( a = 0; a < kept; a++ )
-        {
-            rounded[ a ] = rounded[ a + 1 ];
-        }
-    }
-
-    for ( a = kept + carried; a < *roundedLength; a++ )
-    {
-        rounded[ a ] = '0';
-    }
-
-    return kept + carried;
+    return (int)( ( product.high >> ( 64 - beta ) ) & 1 );
 }
 
-static inline char* nt_detail_write_f64_exact( double value, char* output )
+/* Divides digits by power = 10^count and adds count to zeros when digits is a multiple of power (Granlund and
+   Montgomery): exactly then digits x inverse, where inverse = 5^-count (mod 2^64), rotated right by count bits, is at
+   most (2^64 - 1) / power, and it is the quotient. */
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_remove_zeros( nt_u64* digits, nt_i32* zeros, nt_i32 count, nt_u64 power, nt_u64 inverse )
 {
-    nt_u64 bits           = nt_detail_f64_bits( value );
-    nt_i32 biasedExponent = (nt_i32)( ( bits & NUMBERTEXT_DETAIL_EXPONENT_MASK ) >> NUMBERTEXT_DETAIL_FRACTION_BITS );
-    nt_u64 mantissa       = bits & NUMBERTEXT_DETAIL_FRACTION_MASK;
-    nt_i32 exponent       = NUMBERTEXT_DETAIL_MINIMUM_EXPONENT;
-    int    narrowLowerGap;
-    int    includeBounds;
-    nt_u64 bound[ 3 ];
-    char   digits[ 3 ][ NUMBERTEXT_DETAIL_EXACT_DIGITS ];
-    nt_i32 digitCount[ 3 ];
-    nt_i32 scaleExponent;
-    nt_i32 decimalScale;
-    char   rounded[ NUMBERTEXT_DETAIL_EXACT_DIGITS + 1 ];
-    nt_i32 roundedLength    = 0;
-    nt_i32 significantCount = 0;
-    nt_i32 precision;
-    nt_i32 a;
+    nt_u64 product  = *digits * inverse;
+    nt_u64 quotient = ( product >> count ) | ( product << ( 64 - count ) );
+    int    multiple = quotient <= ~(nt_u64)0 / power;
 
-    if ( bits & NUMBERTEXT_DETAIL_SIGN_BIT )
-    {
-        *output++ = '-';
-    }
-
-    if ( biasedExponent == 0 && mantissa == 0 )
-    {
-        output[ 0 ] = '0';
-        output[ 1 ] = 0;
-
-        return output + 1;
-    }
-
-    if ( biasedExponent != 0 )
-    {
-        mantissa |= NUMBERTEXT_DETAIL_HIDDEN_BIT;
-        exponent = biasedExponent - NUMBERTEXT_DETAIL_SIGNIFICAND_BIAS;
-    }
-
-    narrowLowerGap = ( mantissa == NUMBERTEXT_DETAIL_HIDDEN_BIT ) && ( biasedExponent > 1 );
-    includeBounds  = ( mantissa & 1 ) == 0;
-
-    bound[ 0 ] = 4 * mantissa - ( narrowLowerGap ? 1 : 2 );
-    bound[ 1 ] = 4 * mantissa;
-    bound[ 2 ] = 4 * mantissa + 2;
-
-    scaleExponent = exponent - 2;
-    decimalScale  = ( scaleExponent < 0 ) ? -scaleExponent : 0;
-
-    for ( a = 0; a < 3; a++ )
-    {
-        nt_detail_big integer;
-
-        nt_detail_big_set( &integer, bound[ a ] );
-
-        if ( scaleExponent >= 0 )
-        {
-            nt_detail_big_multiply_power2( &integer, scaleExponent );
-        }
-        else
-        {
-            nt_detail_big_multiply_power5( &integer, -scaleExponent );
-        }
-
-        digitCount[ a ] = nt_detail_big_to_decimal( &integer, digits[ a ] );
-    }
-
-    for ( precision = 1; precision <= NUMBERTEXT_DETAIL_MAXIMUM_PRECISION; precision++ )
-    {
-        nt_i32 lowerLimit = includeBounds ? 0 : 1;
-        nt_i32 upperLimit = includeBounds ? 0 : -1;
-
-        significantCount = nt_detail_round_to_precision( digits[ 1 ], digitCount[ 1 ], precision, rounded, &roundedLength );
-
-        if ( precision == NUMBERTEXT_DETAIL_MAXIMUM_PRECISION ||
-             ( nt_detail_compare_decimal( rounded, roundedLength, digits[ 0 ], digitCount[ 0 ] ) >= lowerLimit &&
-               nt_detail_compare_decimal( rounded, roundedLength, digits[ 2 ], digitCount[ 2 ] ) <= upperLimit ) )
-        {
-            break;
-        }
-    }
-
-    while ( significantCount > 1 && rounded[ significantCount - 1 ] == '0' )
-    {
-        significantCount--;
-    }
-
-    return nt_detail_write_layout( rounded, significantCount, roundedLength - decimalScale, output );
+    *digits = multiple ? quotient : *digits;
+    *zeros += multiple ? count : 0;
 }
 
-/* The top 64 bits of the 192-bit product, with the lowest bit set when any discarded bit is set, so that the result
-   is never mistaken for an exact one. */
-static inline nt_u64 nt_detail_round_to_odd( nt_u64 powerHigh, nt_u64 powerLow, nt_u64 value )
+/* The number of trailing zeros of digits, at most 31. */
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_trailing_zeros( nt_u64 digits )
 {
-    nt_detail_wide low    = nt_detail_multiply64( powerLow, value );
-    nt_detail_wide high   = nt_detail_multiply64( powerHigh, value );
-    nt_u64         middle = high.low + low.high;
-    nt_u64         upper  = high.high + ( ( middle < high.low ) ? 1 : 0 );
+    nt_i32 zeros = 0;
 
-    return upper | ( ( middle > 1 ) ? 1 : 0 );
+    nt_detail_remove_zeros( &digits, &zeros, 16, 10000000000000000ULL, 0xE4A4D1417CD9A041ULL );
+    nt_detail_remove_zeros( &digits, &zeros, 8, 100000000, 0xC767074B22E90E21ULL );
+    nt_detail_remove_zeros( &digits, &zeros, 4, 10000, 0xD288CE703AFB7E91ULL );
+    nt_detail_remove_zeros( &digits, &zeros, 2, 100, 0x8F5C28F5C28F5C29ULL );
+    nt_detail_remove_zeros( &digits, &zeros, 1, 10, 0xCCCCCCCCCCCCCCCDULL );
+
+    return zeros;
 }
 
-/* Schubfach (Raffaello Giulietti, "The Schubfach way to render doubles", 2020): the shortest decimal digits x 10^exponent10
-   that read back to significand x 2^exponent, the closest one when several have that length. Requires a symmetric
-   rounding interval, so not the powers of two whose gap below is narrower. */
-static inline int nt_detail_find_shortest( nt_u64 significand, nt_i32 exponent, nt_u64* digits, nt_i32* exponent10 )
+/* Dragonbox (Junekey Jeon, "Dragonbox: A New Floating-Point Binary-to-Decimal Conversion Algorithm", 2020): the shortest
+   decimal digits x 10^exponent10 that read back to significand x 2^exponent, the closest one when several have that
+   length, ties to even. One multiplication scales the upper end of the rounding interval so that, divided by 1000, it
+   gives the shorter candidate; the remainder decides whether that candidate is inside the interval, and otherwise gives
+   one more digit. Either way the digits are the shorter candidate and a last digit, a zero when that candidate is
+   inside, and they come back in those two parts, so that the writer starts on the leading digits while the last one is
+   still being decided (xjb writes its last digit apart too); the writer leaves out trailing zeros. The last digit,
+   (remainder - delta / 2 + 50) / 100, stays below 10: the remainder is at most 999 with delta at least 100, or 1000
+   where the upper end is a multiple of 1000, and there delta is at least 102 (Tools/GenerateTable.py checks both). */
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_find_shortest( nt_u64 significand, nt_i32 exponent, nt_u64* leading, nt_u32* last, nt_i32* exponent10 )
 {
-    nt_i32        decimalExponent = nt_detail_floor_log10_pow2( exponent );
-    nt_i32        power           = -decimalExponent;
-    nt_u64        odd             = significand & 1;
-    const nt_u64* entry;
-    nt_u64        powerLow;
-    nt_u64        powerHigh;
-    nt_i32        shift;
-    nt_u64        lower;
-    nt_u64        center;
-    nt_u64        upper;
-    nt_u64        scaled;
-    int           belowInside;
-    int           aboveInside;
+    int            includeEnds = ( significand & 1 ) == 0;
+    nt_i32         minusK      = nt_detail_floor_log10_pow2( exponent ) - 2;
+    nt_detail_wide power       = nt_detail_power_of_ten_rounded_up( -minusK );
+    nt_i32         beta        = exponent + nt_detail_floor_log2_pow10( -minusK );
+    nt_u32         delta       = (nt_u32)( power.high >> ( 63 - beta ) );
+    nt_detail_wide upper       = nt_detail_multiply_upper( ( 2 * significand + 1 ) << beta, power );
+    nt_u64         quotient    = upper.high / 1000;
+    nt_u32         remainder   = (nt_u32)( upper.high - 1000 * quotient );
+    int            shorterFits = remainder < delta;
+    nt_u32         distance;
+    nt_u32         next;
+    int            approximateParity;
 
-    if ( power < NUMBERTEXT_DETAIL_MINIMUM_POWER_OF_FIVE || power > NUMBERTEXT_DETAIL_MAXIMUM_POWER_OF_FIVE )
+    if ( remainder == 0 && upper.low == 0 && !includeEnds )
     {
-        return 0;
+        quotient--;
+        remainder   = 1000;
+        shorterFits = 0;
+    }
+    else if ( remainder == delta )
+    {
+        int lowerIsInteger;
+        int lowerParity = nt_detail_product_parity( 2 * significand - 1, power, beta, &lowerIsInteger );
+
+        shorterFits = lowerParity || ( lowerIsInteger && includeEnds );
     }
 
-    entry     = nt_detail_power_of_five_128() + 2 * ( power - NUMBERTEXT_DETAIL_MINIMUM_POWER_OF_FIVE );
-    powerLow  = entry[ 1 ] + (nt_u64)nt_detail_power_of_five_is_truncated( power );
-    powerHigh = entry[ 0 ] + ( ( powerLow < entry[ 1 ] ) ? 1 : 0 );
-    shift     = exponent + nt_detail_floor_log2_pow10( power ) + 1;
+    distance          = remainder - delta / 2 + 50;
+    approximateParity = ( ( distance ^ 50 ) & 1 ) != 0;
+    next              = distance / 100;
 
-    /* The value and the halfway points to its neighbours, times 4 x 10^-exponent10. Halfway points round to even, so
-       they belong to the interval only when the significand is even. */
-    lower  = nt_detail_round_to_odd( powerHigh, powerLow, ( 4 * significand - 2 ) << shift ) + odd;
-    center = nt_detail_round_to_odd( powerHigh, powerLow, ( 4 * significand ) << shift );
-    upper  = nt_detail_round_to_odd( powerHigh, powerLow, ( 4 * significand + 2 ) << shift ) - odd;
-    scaled = center >> 2;
-
-    /* One digit fewer is the only shorter length that can fit; when exactly one of its two candidates is inside, it wins. */
-    if ( scaled >= 10 )
+    if ( distance % 100 == 0 )
     {
-        nt_u64 shorter = scaled / 10;
+        int valueIsInteger;
+        int valueParity = nt_detail_product_parity( 2 * significand, power, beta, &valueIsInteger );
 
-        belowInside = ( lower <= 40 * shorter );
-        aboveInside = ( 40 * shorter + 40 <= upper );
-
-        if ( belowInside != aboveInside )
+        if ( valueParity != approximateParity || ( valueIsInteger && ( next & 1 ) ) )
         {
-            *digits     = shorter + (nt_u64)aboveInside;
-            *exponent10 = decimalExponent + 1;
-
-            return 1;
+            next--;
         }
     }
 
-    belowInside = ( lower <= 4 * scaled );
-    aboveInside = ( 4 * scaled + 4 <= upper );
-    *exponent10 = decimalExponent;
+    *leading    = quotient;
+    *last       = shorterFits ? 0 : next;
+    *exponent10 = minusK + 2;
+}
 
-    if ( belowInside != aboveInside )
+/* The same for a power of two above the smallest normal, 2^exponent x 2^fractionBits, where the gap to the next value
+   below is half the gap above and the interval ends follow directly from the power of ten. */
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_find_shortest_narrow( nt_i32 exponent, nt_i32 fractionBits, nt_u64* digits, nt_i32* exponent10 )
+{
+    nt_i32         minusK = nt_detail_floor_log10_three_quarters_pow2( exponent );
+    nt_detail_wide power  = nt_detail_power_of_ten_rounded_up( -minusK );
+    nt_i32         beta   = exponent + nt_detail_floor_log2_pow10( -minusK );
+    nt_i32         shift  = 64 - fractionBits - 1 - beta;
+    nt_u64         lower  = ( power.high - ( power.high >> ( fractionBits + 2 ) ) ) >> shift;
+    nt_u64         upper  = ( power.high + ( power.high >> ( fractionBits + 1 ) ) ) >> shift;
+
+    /* A power of two is even, so the lower end belongs to the interval, but it is a whole number only here. */
+    if ( exponent < 2 || exponent > 3 )
     {
-        *digits = scaled + (nt_u64)aboveInside;
-    }
-    else
-    {
-        *digits = scaled + ( ( center > 4 * scaled + 2 || ( center == 4 * scaled + 2 && ( scaled & 1 ) ) ) ? 1 : 0 );
+        lower++;
     }
 
-    return 1;
+    if ( upper / 10 * 10 >= lower )
+    {
+        *digits     = upper / 10;
+        *exponent10 = minusK + 1;
+
+        return;
+    }
+
+    *digits     = ( ( power.high >> ( shift - 1 ) ) + 1 ) / 2;
+    *exponent10 = minusK;
+
+    /* The value is exactly halfway between two candidates only when twice it is an odd whole number. */
+    if ( ( *digits & 1 ) && minusK - exponent == fractionBits + 1 )
+    {
+        ( *digits )--;
+    }
+    else if ( *digits < lower )
+    {
+        ( *digits )++;
+    }
 }
 
 static inline const char* nt_detail_digit_pairs( void )
@@ -1694,7 +1512,7 @@ static inline const char* nt_detail_digit_pairs( void )
     return pairs;
 }
 
-static inline void nt_detail_write_two( nt_u32 value, char* digits )
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_write_two( nt_u32 value, char* digits )
 {
     const char* pairs = nt_detail_digit_pairs();
 
@@ -1702,20 +1520,20 @@ static inline void nt_detail_write_two( nt_u32 value, char* digits )
     digits[ 1 ] = pairs[ value * 2 + 1 ];
 }
 
-static inline void nt_detail_write_four( nt_u32 value, char* digits )
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_write_four( nt_u32 value, char* digits )
 {
     nt_detail_write_two( value / 100, digits );
     nt_detail_write_two( value % 100, digits + 2 );
 }
 
-static inline void nt_detail_write_eight( nt_u32 value, char* digits )
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_write_eight( nt_u32 value, char* digits )
 {
     nt_detail_write_four( value / 10000, digits );
     nt_detail_write_four( value % 10000, digits + 4 );
 }
 
 /* value is below 10^4 and is written without leading zeros. */
-static inline nt_i32 nt_detail_write_leading_four( nt_u32 value, char* digits )
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_write_leading_four( nt_u32 value, char* digits )
 {
     nt_i32 length = 0;
 
@@ -1752,7 +1570,7 @@ static inline nt_i32 nt_detail_write_leading_four( nt_u32 value, char* digits )
 }
 
 /* value is below 10^8 and is written without leading zeros. */
-static inline nt_i32 nt_detail_write_leading_eight( nt_u32 value, char* digits )
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_write_leading_eight( nt_u32 value, char* digits )
 {
     nt_i32 length;
 
@@ -1769,7 +1587,7 @@ static inline nt_i32 nt_detail_write_leading_eight( nt_u32 value, char* digits )
 
 /* The digits are split into blocks of eight and four that are written independently, rather than peeled off one pair
    at a time, so the divisions don't have to wait for each other. */
-static inline nt_i32 nt_detail_write_unsigned( nt_u64 value, char* digits )
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_write_unsigned( nt_u64 value, char* digits )
 {
     const nt_u64 tenToThe8  = 100000000ULL;
     const nt_u64 tenToThe16 = 10000000000000000ULL;
@@ -1797,106 +1615,308 @@ static inline nt_i32 nt_detail_write_unsigned( nt_u64 value, char* digits )
     return length + 16;
 }
 
-static inline char* nt_detail_write_f64_fast( double value, char* output )
+#if defined( NUMBERTEXT_DETAIL_SSE2 )
+
+/* The sixteen digits, as values, of high and low, each below 10^8, each step on all of them at once: the two halves
+   split into groups of four, the groups into pairs and the pairs into digits, the quotient staying in the lower half of
+   its lane and the remainder moving to the upper half. The quotients are multiplications by reciprocals: 0xD1B71759
+   shifted by 45 divides by 10^4, 5243 by 19 divides by 100 and 6554 by 16 divides by 10, exactly in these ranges. The
+   last step leaves the tens and the ones in one multiply-add (an idea from Dougall Johnson's NEON digits in zmij): a
+   pair shifted up by eight bits, plus its tens times one minus 10 shifted up the same way, is the tens with the ones
+   above them. */
+NUMBERTEXT_DETAIL_FORCE_INLINE __m128i nt_detail_sixteen_digits( nt_u64 high, nt_u64 low )
 {
-    nt_u64 bits           = nt_detail_f64_bits( value );
-    nt_i32 biasedExponent = (nt_i32)( ( bits & NUMBERTEXT_DETAIL_EXPONENT_MASK ) >> NUMBERTEXT_DETAIL_FRACTION_BITS );
-    nt_u64 mantissa       = bits & NUMBERTEXT_DETAIL_FRACTION_MASK;
-    nt_u64 significand    = mantissa | NUMBERTEXT_DETAIL_HIDDEN_BIT;
-    nt_i32 exponent       = biasedExponent - NUMBERTEXT_DETAIL_SIGNIFICAND_BIAS;
-    char   digits[ 24 ];
-    nt_i32 digitCount;
-    nt_i32 pointPosition;
+    __m128i halves    = _mm_set_epi64x( (long long)low, (long long)high );
+    __m128i firstFour = _mm_srli_epi64( _mm_mul_epu32( halves, _mm_set1_epi32( (int)0xD1B71759 ) ), 45 );
+    __m128i lastFour  = _mm_sub_epi32( halves, _mm_mul_epu32( firstFour, _mm_set1_epi32( 10000 ) ) );
+    __m128i fours     = _mm_or_si128( firstFour, _mm_slli_epi64( lastFour, 32 ) );
+    __m128i firstTwo  = _mm_srli_epi16( _mm_mulhi_epu16( fours, _mm_set1_epi16( 5243 ) ), 3 );
+    __m128i lastTwo   = _mm_sub_epi16( fours, _mm_mullo_epi16( firstTwo, _mm_set1_epi16( 100 ) ) );
+    __m128i pairs     = _mm_or_si128( firstTwo, _mm_slli_epi32( lastTwo, 16 ) );
+    __m128i tens      = _mm_mulhi_epu16( pairs, _mm_set1_epi16( 6554 ) );
 
-    if ( biasedExponent == 0 && mantissa == 0 )
+    return _mm_add_epi16( _mm_slli_epi16( pairs, 8 ), _mm_mullo_epi16( tens, _mm_set1_epi16( 1 - 10 * 256 ) ) );
+}
+
+/* How many of the sixteen characters of text there are up to the last one that is not '0', 0 when they all are. */
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_significant_digits( __m128i text )
+{
+    nt_u32 nonzero = (nt_u32)_mm_movemask_epi8( _mm_cmpeq_epi8( text, _mm_set1_epi8( '0' ) ) ) ^ 0xFFFF;
+
+    return 63 - nt_detail_count_leading_zeros( (nt_u64)nonzero << 1 | 1 );
+}
+
+#elif defined( NUMBERTEXT_DETAIL_NEON )
+
+/* The same with NEON, where every step is such a multiply-add: a lane shifted up by half its width, plus the quotient
+   times one minus the divisor shifted up the same way, is the quotient with the remainder above it. The quotients are
+   the high halves of doubled products: 109951163 and a shift by 9 divide by 10^4, 5243 << 12 divides by 100 and 3277
+   by 10, exactly in these ranges. */
+NUMBERTEXT_DETAIL_FORCE_INLINE uint8x16_t nt_detail_sixteen_digits( nt_u64 high, nt_u64 low )
+{
+    int32x2_t halves    = vreinterpret_s32_u64( vcreate_u64( high | low << 32 ) );
+    int32x2_t firstFour = vshr_n_s32( vqdmulh_n_s32( halves, 109951163 ), 9 );
+    int16x4_t fours     = vreinterpret_s16_s32( vmla_n_s32( vshl_n_s32( halves, 16 ), firstFour, 1 - 10000 * 65536 ) );
+    int32x4_t firstTwo  = vqdmulhq_n_s32( vmovl_s16( fours ), 5243 << 12 );
+    int16x8_t pairs     = vreinterpretq_s16_s32( vmlaq_n_s32( vshll_n_s16( fours, 16 ), firstTwo, 1 - 100 * 65536 ) );
+    int16x8_t tens      = vqdmulhq_n_s16( pairs, 3277 );
+
+    return vreinterpretq_u8_s16( vmlaq_n_s16( vshlq_n_s16( pairs, 8 ), tens, 1 - 10 * 256 ) );
+}
+
+/* The same with four bits for each character: each pair of comparison bytes, shifted right by four and narrowed, keeps
+   four of each. */
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_significant_digits( uint8x16_t text )
+{
+    uint16x8_t zeros   = vreinterpretq_u16_u8( vceqq_u8( text, vdupq_n_u8( '0' ) ) );
+    nt_u64     nonzero = ~vget_lane_u64( vreinterpret_u64_u8( vshrn_n_u16( zeros, 4 ) ), 0 );
+
+    return ( 64 - nt_detail_count_leading_zeros( nonzero | 1 ) ) / 4;
+}
+
+#endif
+
+/* Writes leading x 10 + last, which has width - 1 or width digits, as exactly width digits, 9 or 17, and returns how many
+   are left without the trailing zeros. The leading digits are converted first and the last one, which the core decides
+   later, joins them at the end. With SIMD they are the first sixteen, a float's eight followed by eight zeros, and the
+   digits that are not zero are found all at once. */
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_write_fixed( nt_u64 leading, nt_u32 last, nt_i32 width, char* digits )
+{
+    const nt_u64 tenToThe8 = 100000000ULL;
+    nt_u64       high      = ( width == 9 ) ? leading : leading / tenToThe8;
+    nt_u64       low       = ( width == 9 ) ? 0 : leading - high * tenToThe8;
+
+#if defined( NUMBERTEXT_DETAIL_SSE2 )
+
+    __m128i text = _mm_add_epi8( nt_detail_sixteen_digits( high, low ), _mm_set1_epi8( '0' ) );
+    __m128i after;
+
+    if ( width == 9 )
     {
-        if ( bits & NUMBERTEXT_DETAIL_SIGN_BIT )
-        {
-            *output++ = '-';
-        }
+        text = _mm_add_epi8( text, _mm_slli_si128( _mm_cvtsi32_si128( (int)last ), 8 ) );
 
-        output[ 0 ] = '0';
-        output[ 1 ] = 0;
+        _mm_storeu_si128( (__m128i*)(void*)digits, text );
 
-        return output + 1;
+        return nt_detail_significant_digits( text );
     }
 
-    if ( biasedExponent == 0 )
+    after = _mm_or_si128( _mm_srli_si128( text, 1 ), _mm_slli_si128( _mm_cvtsi32_si128( (int)( '0' + last ) ), 15 ) );
+
+    _mm_storeu_si128( (__m128i*)(void*)( digits + 1 ), after );
+    _mm_storeu_si128( (__m128i*)(void*)digits, text );
+
+    return 1 + nt_detail_significant_digits( after );
+
+#elif defined( NUMBERTEXT_DETAIL_NEON )
+
+    uint8x16_t text = vaddq_u8( nt_detail_sixteen_digits( high, low ), vdupq_n_u8( '0' ) );
+    uint8x16_t after;
+
+    if ( width == 9 )
     {
-        significand = mantissa;
-        exponent    = NUMBERTEXT_DETAIL_MINIMUM_EXPONENT;
+        text = vsetq_lane_u8( (unsigned char)( '0' + last ), text, 8 );
+
+        vst1q_u8( (unsigned char*)digits, text );
+
+        return nt_detail_significant_digits( text );
     }
 
-    if ( exponent <= 0 && exponent > -NUMBERTEXT_DETAIL_SIGNIFICAND_BITS && ( significand & ( ( (nt_u64)1 << -exponent ) - 1 ) ) == 0 )
+    after = vextq_u8( text, vdupq_n_u8( (unsigned char)( '0' + last ) ), 1 );
+
+    vst1q_u8( (unsigned char*)digits + 1, after );
+    vst1q_u8( (unsigned char*)digits, text );
+
+    return 1 + nt_detail_significant_digits( after );
+
+#else
+
+    nt_detail_write_eight( (nt_u32)high, digits );
+
+    if ( width == 17 )
     {
-        digitCount    = nt_detail_write_unsigned( significand >> -exponent, digits );
-        pointPosition = digitCount;
+        nt_detail_write_eight( (nt_u32)low, digits + 8 );
+    }
+
+    digits[ width - 1 ] = (char)( '0' + last );
+
+    return width - nt_detail_trailing_zeros( leading * 10 + last );
+
+#endif
+}
+
+static inline const nt_u64* nt_detail_powers_of_ten( void )
+{
+    static const nt_u64 powers[ 20 ] = { 1ULL,
+                                         10ULL,
+                                         100ULL,
+                                         1000ULL,
+                                         10000ULL,
+                                         100000ULL,
+                                         1000000ULL,
+                                         10000000ULL,
+                                         100000000ULL,
+                                         1000000000ULL,
+                                         10000000000ULL,
+                                         100000000000ULL,
+                                         1000000000000ULL,
+                                         10000000000000ULL,
+                                         100000000000000ULL,
+                                         1000000000000000ULL,
+                                         10000000000000000ULL,
+                                         100000000000000000ULL,
+                                         1000000000000000000ULL,
+                                         10000000000000000000ULL };
+
+    return powers;
+}
+
+/* value is not zero. */
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_decimal_length( nt_u64 value )
+{
+    const nt_u64* powers = nt_detail_powers_of_ten();
+
+    nt_i32 guess = ( ( 64 - nt_detail_count_leading_zeros( value ) ) * 1233 ) >> 12;
+
+    return guess + ( ( value >= powers[ guess ] ) ? 1 : 0 );
+}
+
+/* Scales leading x 10 + last, not zero and at most width digits, to width or width - 1 digits, lowers exponent10 to
+   match, and returns how many fewer than width they have, 0 or 1. Shortest digits mostly have that many already, which
+   one comparison of the leading digits tells, so that they are written without waiting for a multiplication or for the
+   last digit. Scaled digits end in a zero. */
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_widen( nt_u64* leading, nt_u32* last, nt_i32* exponent10, nt_i32 width )
+{
+    const nt_u64* powers = nt_detail_powers_of_ten();
+    nt_u64        digits;
+    nt_i32        count;
+
+    if ( *leading >= powers[ width - 3 ] )
+    {
+        return ( *leading < powers[ width - 2 ] ) ? 1 : 0;
+    }
+
+    digits   = *leading * 10 + *last;
+    count    = nt_detail_decimal_length( digits );
+    *leading = digits * powers[ width - 1 - count ];
+    *last    = 0;
+    *exponent10 -= width - count;
+
+    return 0;
+}
+
+/* Moves the count characters after output one place to the left. With SIMD the first sixteen move in one step, read
+   with the same 16 bytes that wrote them so that the read takes them straight from the write. */
+NUMBERTEXT_DETAIL_FORCE_INLINE void nt_detail_move_left( char* output, nt_i32 count )
+{
+    nt_i32 a = 0;
+
+#if defined( NUMBERTEXT_DETAIL_SSE2 )
+
+    __m128i next  = _mm_loadu_si128( (const __m128i*)(const void*)( output + 1 ) );
+    __m128i moved = _mm_cmplt_epi8( _mm_setr_epi8( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ), _mm_set1_epi8( (char)count ) );
+
+    _mm_storeu_si128( (__m128i*)(void*)output, _mm_or_si128( _mm_and_si128( moved, next ), _mm_andnot_si128( moved, _mm_slli_si128( next, 1 ) ) ) );
+
+    a = 16;
+
+#elif defined( NUMBERTEXT_DETAIL_NEON )
+
+    static const unsigned char positions[ 16 ] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+
+    uint8x16_t next  = vld1q_u8( (const unsigned char*)output + 1 );
+    uint8x16_t moved = vcltq_u8( vld1q_u8( positions ), vdupq_n_u8( (unsigned char)count ) );
+
+    vst1q_u8( (unsigned char*)output, vbslq_u8( moved, next, vextq_u8( vdupq_n_u8( 0 ), next, 15 ) ) );
+
+    a = 16;
+
+#endif
+
+    for ( ; a < count; a += 2 )
+    {
+        char first  = output[ a + 1 ];
+        char second = output[ a + 2 ];
+
+        output[ a ]     = first;
+        output[ a + 1 ] = second;
+    }
+}
+
+/* Writes exponent, between -1000 and 1000, as a sign and the digits without leading zeros, and returns the end. Each
+   digit goes where the digits before it leave it, over them when they are all zeros. */
+NUMBERTEXT_DETAIL_FORCE_INLINE char* nt_detail_write_exponent( nt_i32 exponent, char* output )
+{
+    nt_i32      negative  = ( exponent < 0 ) ? 1 : 0;
+    nt_u32      magnitude = (nt_u32)( ( exponent ^ -negative ) + negative );
+    const char* pairs     = nt_detail_digit_pairs() + magnitude % 100 * 2;
+    nt_i32      tens      = ( magnitude >= 100 ) ? 2 : 1;
+    nt_i32      ones      = tens + ( ( magnitude >= 10 ) ? 1 : 0 );
+
+    output[ 0 ]    = (char)( '+' + 2 * negative );
+    output[ 1 ]    = (char)( '0' + magnitude / 100 );
+    output[ tens ] = pairs[ 0 ];
+    output[ ones ] = pairs[ 1 ];
+
+    return output + ones + 1;
+}
+
+/* Writes (leading x 10 + last) x 10^exponent10, not zero and at most width digits, in plain decimal from 1e-6 up to 1e21
+   and in exponent form outside that range. The digits are written as exactly width digits, so that writing them takes
+   the same steps for every number, and the text ends before their trailing zeros. They are written once, behind a run
+   of zeros, to where the layout wants them, a leading zero going one place earlier where the layout writes over it,
+   and only the few in front of the point move. Compilers turn byte loops into calls to memset and memmove, which cost
+   more than these few bytes, so the zeros are a fixed run. */
+NUMBERTEXT_DETAIL_FORCE_INLINE char* nt_detail_write_decimal( nt_u64 leading, nt_u32 last, nt_i32 exponent10, nt_i32 width, char* output )
+{
+    nt_i32 leadingZero   = nt_detail_widen( &leading, &last, &exponent10, width );
+    nt_i32 pointPosition = width - leadingZero + exponent10;
+    int    exponentForm  = pointPosition < -5 || pointPosition > 21;
+    nt_i32 start         = ( !exponentForm && pointPosition <= 0 ) ? 2 - pointPosition : 1;
+    nt_i32 significant;
+    nt_i32 a;
+
+    for ( a = 0; a < 23; a++ )
+    {
+        output[ a ] = '0';
+    }
+
+    significant = nt_detail_write_fixed( leading, last, width, output + start - leadingZero ) - leadingZero;
+
+    if ( exponentForm )
+    {
+        output[ 0 ] = output[ 1 ];
+        output[ 1 ] = '.';
+        output += significant + ( ( significant > 1 ) ? 1 : 0 );
+        output[ 0 ] = 'e';
+        output      = nt_detail_write_exponent( pointPosition - 1, output + 1 );
+    }
+    else if ( pointPosition <= 0 )
+    {
+        output[ 1 ] = '.';
+        output += start + significant;
     }
     else
     {
-        nt_u64 shortest;
-        nt_i32 exponent10;
+        nt_detail_move_left( output, pointPosition );
 
-        /* At a power of two the gap below is half the gap above; the exact writer handles that case. */
-        if ( ( mantissa == 0 && biasedExponent > 1 ) || !nt_detail_find_shortest( significand, exponent, &shortest, &exponent10 ) )
-        {
-            return 0;
-        }
-
-        digitCount    = nt_detail_write_unsigned( shortest, digits );
-        pointPosition = digitCount + exponent10;
+        output[ pointPosition ] = '.';
+        output += ( pointPosition < significant ) ? significant + 1 : pointPosition;
     }
 
-    while ( digitCount > 1 && digits[ digitCount - 1 ] == '0' )
-    {
-        digitCount--;
-    }
+    *output = 0;
 
-    if ( bits & NUMBERTEXT_DETAIL_SIGN_BIT )
-    {
-        *output++ = '-';
-    }
-
-    return nt_detail_write_layout( digits, digitCount, pointPosition, output );
+    return output;
 }
 
-static inline nt_i32 nt_write_f64( double value, char* output )
+NUMBERTEXT_DETAIL_FORCE_INLINE nt_i32 nt_detail_write_binary( nt_detail_format format, nt_u64 bits, char* output )
 {
-    char* end;
-
-    if ( !nt_detail_is_finite( nt_detail_f64_bits( value ) ) )
-    {
-        output[ 0 ] = 0;
-        return 0;
-    }
-
-    end = nt_detail_write_f64_fast( value, output );
-
-    if ( !end )
-    {
-        end = nt_detail_write_f64_exact( value, output );
-    }
-
-    return (nt_i32)( end - output );
-}
-
-static inline nt_i32 nt_write_f32( float value, char* output )
-{
-    nt_detail_format format         = nt_detail_f32_format();
-    nt_u32           bits           = nt_detail_f32_bits( value );
-    nt_u32           magnitudeBits  = bits & ~(nt_u32)nt_detail_sign_bit( format );
-    nt_i32           biasedExponent = (nt_i32)( magnitudeBits >> format.fractionBits );
-    nt_u64           significand    = magnitudeBits & ( nt_detail_hidden_bit( format ) - 1 );
-    nt_i32           exponent       = nt_detail_minimum_exponent( format );
-    char*            start          = output;
-    char             digits[ NUMBERTEXT_DETAIL_F32_EXACT_DIGITS ];
-    char             rounded[ NUMBERTEXT_DETAIL_F32_EXACT_DIGITS + 1 ];
-    nt_detail_big    integer;
-    nt_i32           digitCount;
-    nt_i32           decimalScale;
-    nt_i32           roundedLength    = 0;
-    nt_i32           significantCount = 0;
-    nt_i32           precision;
+    nt_u64 signBit        = nt_detail_sign_bit( format );
+    nt_u64 hiddenBit      = nt_detail_hidden_bit( format );
+    nt_i32 biasedExponent = (nt_i32)( ( bits & ~signBit ) >> format.fractionBits );
+    nt_u64 mantissa       = bits & ( hiddenBit - 1 );
+    nt_u64 significand    = mantissa | hiddenBit;
+    nt_i32 exponent       = biasedExponent - format.exponentBias - format.fractionBits;
+    char*  start          = output;
 
     if ( biasedExponent == nt_detail_infinite_exponent( format ) )
     {
@@ -1904,12 +1924,10 @@ static inline nt_i32 nt_write_f32( float value, char* output )
         return 0;
     }
 
-    if ( bits != magnitudeBits )
-    {
-        *output++ = '-';
-    }
+    *output = '-';
+    output += ( ( bits & signBit ) != 0 ) ? 1 : 0;
 
-    if ( magnitudeBits == 0 )
+    if ( biasedExponent == 0 && mantissa == 0 )
     {
         output[ 0 ] = '0';
         output[ 1 ] = 0;
@@ -1917,52 +1935,49 @@ static inline nt_i32 nt_write_f32( float value, char* output )
         return (nt_i32)( output + 1 - start );
     }
 
-    if ( biasedExponent != 0 )
+    if ( biasedExponent == 0 )
     {
-        significand |= nt_detail_hidden_bit( format );
-        exponent = biasedExponent - format.exponentBias - format.fractionBits;
+        significand = mantissa;
+        exponent    = nt_detail_minimum_exponent( format );
     }
 
-    nt_detail_big_set( &integer, significand );
-
-    if ( exponent >= 0 )
+    if ( exponent <= 0 && exponent > -( format.fractionBits + 1 ) && ( significand & ( ( (nt_u64)1 << -exponent ) - 1 ) ) == 0 )
     {
-        nt_detail_big_multiply_power2( &integer, exponent );
+        output += nt_detail_write_unsigned( significand >> -exponent, output );
+        *output = 0;
     }
     else
     {
-        nt_detail_big_multiply_power5( &integer, -exponent );
-    }
+        nt_u64 leading;
+        nt_u32 last;
+        nt_i32 exponent10;
 
-    decimalScale = ( exponent < 0 ) ? -exponent : 0;
-    digitCount   = nt_detail_big_to_decimal( &integer, digits );
-
-    for ( precision = 1; precision <= NUMBERTEXT_DETAIL_F32_MAXIMUM_PRECISION; precision++ )
-    {
-        nt_decimal candidate;
-        float      readBack = 0;
-
-        significantCount = nt_detail_round_to_precision( digits, digitCount, precision, rounded, &roundedLength );
-
-        candidate.digits   = rounded;
-        candidate.count    = roundedLength;
-        candidate.exponent = -decimalScale;
-        candidate.negative = 0;
-
-        nt_decimal_to_f32( &candidate, &readBack );
-
-        if ( nt_detail_f32_bits( readBack ) == magnitudeBits )
+        if ( mantissa == 0 && biasedExponent > 1 )
         {
-            break;
+            nt_detail_find_shortest_narrow( exponent, format.fractionBits, &leading, &exponent10 );
+
+            last = (nt_u32)( leading % 10 );
+            leading /= 10;
         }
+        else
+        {
+            nt_detail_find_shortest( significand, exponent, &leading, &last, &exponent10 );
+        }
+
+        output = nt_detail_write_decimal( leading, last, exponent10, format.shortestDigits, output );
     }
 
-    while ( significantCount > 1 && rounded[ significantCount - 1 ] == '0' )
-    {
-        significantCount--;
-    }
+    return (nt_i32)( output - start );
+}
 
-    return (nt_i32)( nt_detail_write_layout( rounded, significantCount, roundedLength - decimalScale, output ) - start );
+static inline nt_i32 nt_write_f64( double value, char* output )
+{
+    return nt_detail_write_binary( nt_detail_f64_format(), nt_detail_f64_bits( value ), output );
+}
+
+static inline nt_i32 nt_write_f32( float value, char* output )
+{
+    return nt_detail_write_binary( nt_detail_f32_format(), nt_detail_f32_bits( value ), output );
 }
 
 static inline nt_i32 nt_write_u64( nt_u64 value, char* output )
