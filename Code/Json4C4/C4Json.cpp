@@ -54,6 +54,15 @@
 #endif
 
 #include "C4Json.h"
+
+// Without system headers, Terathon declares its own SSE types, which clash with the <emmintrin.h> that NumberText
+// includes for its SIMD digits.
+#if defined( TERATHON_NO_SYSTEM ) && !defined( NUMBERTEXT_NO_SIMD )
+
+#    define NUMBERTEXT_NO_SIMD
+
+#endif
+
 #include "NumberText.h"
 
 #if defined( _MSC_VER )
