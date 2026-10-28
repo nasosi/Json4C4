@@ -779,76 +779,6 @@ namespace C4
             return ( c - '0' ) < 10U;
         }
 
-        Status ScanNumberLiteral( const char* text, int32* textLength ) noexcept
-        {
-            const uint8* byte = reinterpret_cast<const uint8*>( text );
-
-            if ( byte[ 0 ] == '-' )
-            {
-                byte++;
-            }
-
-            if ( byte[ 0 ] == '0' )
-            {
-                byte++;
-
-                if ( IsDigit( byte[ 0 ] ) )
-                {
-                    return ( Status::kNumbersCannotHaveLeadingZeros );
-                }
-            }
-            else if ( IsDigit( byte[ 0 ] ) )
-            {
-                while ( IsDigit( byte[ 0 ] ) )
-                {
-                    byte++;
-                }
-            }
-            else
-            {
-                return ( Status::kFloatInvalid );
-            }
-
-            if ( byte[ 0 ] == '.' )
-            {
-                byte++;
-
-                if ( !IsDigit( byte[ 0 ] ) )
-                {
-                    return ( Status::kFloatInvalid );
-                }
-
-                while ( IsDigit( byte[ 0 ] ) )
-                {
-                    byte++;
-                }
-            }
-
-            if ( ( byte[ 0 ] == 'e' ) || ( byte[ 0 ] == 'E' ) )
-            {
-                byte++;
-
-                if ( ( byte[ 0 ] == '+' ) || ( byte[ 0 ] == '-' ) )
-                {
-                    byte++;
-                }
-
-                if ( !IsDigit( byte[ 0 ] ) )
-                {
-                    return ( Status::kFloatInvalid );
-                }
-
-                while ( IsDigit( byte[ 0 ] ) )
-                {
-                    byte++;
-                }
-            }
-
-            *textLength = int32( reinterpret_cast<const char*>( byte ) - text );
-
-            return ( Status::kOk );
-        }
-
         int32 ReadEscapeChar( const char* text, uint32* value ) noexcept
         {
             const uint8* byte = reinterpret_cast<const uint8*>( text );
@@ -1031,106 +961,6 @@ namespace C4
             return ( status );
         }
 
-        Status ReadDoubleLiteral( const char* text, int32* textLength, double* value ) noexcept
-        {
-            Status status = ScanNumberLiteral( text, textLength );
-
-            if ( status != Status::kOk )
-            {
-                return ( status );
-            }
-
-            nt_parse_json_f64( text, text + *textLength, value, nullptr );
-
-            return ( Status::kOk );
-        }
-
-        template <class T>
-        Status ParseValue( Value*& value, const char*& text, const ParseOptions& options, int32 depth ) noexcept
-        {
-            T* jsonValue = nullptr;
-
-            Status status = MayThrow(
-                [ & ]()
-                {
-                    jsonValue = new T;
-                    return Status::kOk;
-                } );
-
-            if ( status != Status::kOk )
-            {
-                return status;
-            }
-
-            if constexpr ( Detail::IsSame<T, ArrayValue>::Value || Detail::IsSame<T, ObjectValue>::Value )
-            {
-                status = T::Parse( jsonValue, text, options, depth );
-            }
-            else
-            {
-                status = T::Parse( jsonValue, text );
-            }
-
-            if ( status == Status::kOk )
-            {
-                value = jsonValue;
-
-                return status;
-            }
-
-            delete jsonValue;
-
-            return status;
-        };
-
-        Status ParseAnyValue( Value*& value, const char*& text, const ParseOptions& options, int32 depth ) noexcept
-        {
-            switch ( text[ 0 ] )
-            {
-                case '"':
-                    return ParseValue<StringValue>( value, text, options, depth );
-
-                case '-':
-                case '0':
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7':
-                case '8':
-                case '9':
-                    return ParseValue<NumberValue>( value, text, options, depth );
-
-                case 't':
-                case 'f':
-                    return ParseValue<BoolValue>( value, text, options, depth );
-
-                case 'n':
-                    return ParseValue<NullValue>( value, text, options, depth );
-
-                case '[':
-                    if ( depth >= options.maxNestingDepth )
-                    {
-                        return Status::kMaximumNestingDepthExceeded;
-                    }
-
-                    return ParseValue<ArrayValue>( value, text, options, depth + 1 );
-
-                case '{':
-                    if ( depth >= options.maxNestingDepth )
-                    {
-                        return Status::kMaximumNestingDepthExceeded;
-                    }
-
-                    return ParseValue<ObjectValue>( value, text, options, depth + 1 );
-
-                default:
-                    return Status::kExpectedJsonValue;
-            }
-        }
-
         Status ParseStringLiteral( String<>& string, const char*& text ) noexcept
         {
             if ( text[ 0 ] != '"' )
@@ -1179,12 +1009,6 @@ namespace C4
         class StringValue final : public Value
         {
         public:
-            static Status Parse( StringValue* jsonStringValue, const char*& text ) noexcept
-            {
-                return ParseStringLiteral( jsonStringValue->data, text );
-            }
-
-        public:
             using DataType = String<>;
 
             DataType data;
@@ -1209,29 +1033,6 @@ namespace C4
 
         class NumberValue final : public Value
         {
-        public:
-            static Status Parse( NumberValue* value, const char*& text ) noexcept
-            {
-                int32  length;
-                double doubleData;
-
-                Status status = ReadDoubleLiteral( text, &length, &doubleData );
-
-                if ( status != Status::kOk )
-                {
-                    return ( status );
-                }
-
-                if ( value )
-                {
-                    value->data = doubleData;
-                }
-
-                text += length;
-
-                return ( Status::kOk );
-            }
-
         public:
             using DataType = double;
             DataType data  = 0;
@@ -1265,28 +1066,6 @@ namespace C4
         class BoolValue final : public Value
         {
         public:
-            static Status Parse( BoolValue* value, const char*& text ) noexcept
-            {
-                if ( text[ 0 ] == 't' && text[ 1 ] == 'r' && text[ 2 ] == 'u' && text[ 3 ] == 'e' )
-                {
-                    value->data = true;
-                    text += 4;
-
-                    return Status::kOk;
-                }
-
-                if ( text[ 0 ] == 'f' && text[ 1 ] == 'a' && text[ 2 ] == 'l' && text[ 3 ] == 's' && text[ 4 ] == 'e' )
-                {
-                    value->data = false;
-                    text += 5;
-
-                    return Status::kOk;
-                }
-
-                return Status::kExpectedTrueOrFalse;
-            }
-
-        public:
             using DataType = bool;
             DataType data  = true;
 
@@ -1310,19 +1089,6 @@ namespace C4
 
         class NullValue final : public Value
         {
-        public:
-            static Status Parse( NullValue* /*JsonNullValue*/, const char*& text ) noexcept
-            {
-                if ( text[ 0 ] == 'n' && text[ 1 ] == 'u' && text[ 2 ] == 'l' && text[ 3 ] == 'l' )
-                {
-                    text += 4;
-
-                    return Status::kOk;
-                }
-
-                return Status::kExpectedNull;
-            }
-
         public:
             using DataType = Null;
             DataType data;
@@ -1374,71 +1140,300 @@ namespace C4
 
         } // namespace Detail
 
-        Status ArrayValue::Parse( ArrayValue* jsonArray, const char*& text, const ParseOptions& options, int32 depth ) noexcept
+        class Parser
         {
-            if ( text[ 0 ] != '[' )
+        public:
+            Parser( const char* textEnd, const ParseOptions& parseOptions ) noexcept : end( textEnd ), options( parseOptions )
             {
-                return Status::kExpectedOpeningSquareBrackets;
             }
 
-            bool emptyArray = true;
-
-            for ( ;; )
+            Status ParseValue( Value*& value, const char*& text, int32 depth ) const noexcept
             {
-                text++;
-                text += ComputeWhitespaceLength( text );
-
-                if ( text[ 0 ] == ']' )
+                switch ( text[ 0 ] )
                 {
-                    if ( !emptyArray )
-                    {
+                    case '"':
+                        return ParseNew<StringValue>( value, text, depth );
+
+                    case '-':
+                    case '0':
+                    case '1':
+                    case '2':
+                    case '3':
+                    case '4':
+                    case '5':
+                    case '6':
+                    case '7':
+                    case '8':
+                    case '9':
+                        return ParseNew<NumberValue>( value, text, depth );
+
+                    case 't':
+                    case 'f':
+                        return ParseNew<BoolValue>( value, text, depth );
+
+                    case 'n':
+                        return ParseNew<NullValue>( value, text, depth );
+
+                    case '[':
+                        return ( depth < options.maxNestingDepth ) ? ParseNew<ArrayValue>( value, text, depth + 1 ) : Status::kMaximumNestingDepthExceeded;
+
+                    case '{':
+                        return ( depth < options.maxNestingDepth ) ? ParseNew<ObjectValue>( value, text, depth + 1 ) : Status::kMaximumNestingDepthExceeded;
+
+                    default:
                         return Status::kExpectedJsonValue;
+                }
+            }
+
+        private:
+            const char*         end;
+            const ParseOptions& options;
+
+            template <class T>
+            Status ParseNew( Value*& value, const char*& text, int32 depth ) const noexcept
+            {
+                T* newValue = nullptr;
+
+                Status status = MayThrow(
+                    [ & ]()
+                    {
+                        newValue = new T;
+                        return Status::kOk;
+                    } );
+
+                if ( status == Status::kOk )
+                {
+                    status = Parse( newValue, text, depth );
+
+                    if ( status == Status::kOk )
+                    {
+                        value = newValue;
+                        return status;
                     }
 
-                    text++;
+                    delete newValue;
+                }
+
+                return status;
+            }
+
+            Status Parse( StringValue* value, const char*& text, int32 ) const noexcept
+            {
+                return ParseStringLiteral( value->data, text );
+            }
+
+            Status Parse( NumberValue* value, const char*& text, int32 ) const noexcept
+            {
+                const char* stop;
+
+                // A number out of range keeps the value NumberText gives it, and Write refuses an infinity. The only invalid
+                // number NumberText stops at a digit is one with a leading zero.
+                if ( nt_parse_json_f64( text, end, &value->data, &stop ) == NUMBERTEXT_INVALID )
+                {
+                    return IsDigit( uint8( stop[ 0 ] ) ) ? Status::kNumbersCannotHaveLeadingZeros : Status::kFloatInvalid;
+                }
+
+                text = stop;
+
+                return Status::kOk;
+            }
+
+            Status Parse( BoolValue* value, const char*& text, int32 ) const noexcept
+            {
+                if ( text[ 0 ] == 't' && text[ 1 ] == 'r' && text[ 2 ] == 'u' && text[ 3 ] == 'e' )
+                {
+                    value->data = true;
+                    text += 4;
 
                     return Status::kOk;
                 }
 
-                Value* jsonValue = nullptr;
-                Status status    = ParseAnyValue( jsonValue, text, options, depth );
-                if ( status != Status::kOk )
+                if ( text[ 0 ] == 'f' && text[ 1 ] == 'a' && text[ 2 ] == 'l' && text[ 3 ] == 's' && text[ 4 ] == 'e' )
                 {
-                    return status;
+                    value->data = false;
+                    text += 5;
+
+                    return Status::kOk;
                 }
 
-                status = MayThrow(
-                    [ & ]()
-                    {
-                        jsonArray->data.AppendArrayElement( jsonValue );
-                        return Status::kOk;
-                    } );
-
-                if ( status != Status::kOk )
-                {
-                    delete jsonValue;
-                    return status;
-                }
-
-                emptyArray = false;
-
-                text += ComputeWhitespaceLength( text );
-
-                if ( text[ 0 ] != ',' )
-                {
-                    break;
-                }
+                return Status::kExpectedTrueOrFalse;
             }
 
-            if ( text[ 0 ] != ']' )
+            Status Parse( NullValue*, const char*& text, int32 ) const noexcept
             {
-                return Status::kExpectedClosingSquareBracketsOrComma;
+                if ( text[ 0 ] == 'n' && text[ 1 ] == 'u' && text[ 2 ] == 'l' && text[ 3 ] == 'l' )
+                {
+                    text += 4;
+
+                    return Status::kOk;
+                }
+
+                return Status::kExpectedNull;
             }
 
-            text++;
+            Status Parse( ArrayValue* array, const char*& text, int32 depth ) const noexcept
+            {
+                bool emptyArray = true;
 
-            return Status::kOk;
-        }
+                for ( ;; )
+                {
+                    text++;
+                    text += ComputeWhitespaceLength( text );
+
+                    if ( text[ 0 ] == ']' )
+                    {
+                        if ( !emptyArray )
+                        {
+                            return Status::kExpectedJsonValue;
+                        }
+
+                        text++;
+
+                        return Status::kOk;
+                    }
+
+                    Value* element = nullptr;
+                    Status status  = ParseValue( element, text, depth );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    status = MayThrow(
+                        [ & ]()
+                        {
+                            array->data.AppendArrayElement( element );
+                            return Status::kOk;
+                        } );
+
+                    if ( status != Status::kOk )
+                    {
+                        delete element;
+                        return status;
+                    }
+
+                    emptyArray = false;
+
+                    text += ComputeWhitespaceLength( text );
+
+                    if ( text[ 0 ] != ',' )
+                    {
+                        break;
+                    }
+                }
+
+                if ( text[ 0 ] != ']' )
+                {
+                    return Status::kExpectedClosingSquareBracketsOrComma;
+                }
+
+                text++;
+
+                return Status::kOk;
+            }
+
+            Status Parse( ObjectValue* object, const char*& text, int32 depth ) const noexcept
+            {
+                bool emptyObject = true;
+
+                for ( ;; )
+                {
+                    text++;
+                    text += ComputeWhitespaceLength( text );
+
+                    if ( text[ 0 ] == '}' )
+                    {
+                        if ( !emptyObject )
+                        {
+                            return Status::kExpectedJsonValue;
+                        }
+
+                        text++;
+
+                        return Status::kOk;
+                    }
+
+                    const char* nameStart = text;
+
+                    String<> name;
+                    Status   status = ParseStringLiteral( name, text );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    text += ComputeWhitespaceLength( text );
+
+                    if ( text[ 0 ] != ':' )
+                    {
+                        return Status::kExpectedColon;
+                    }
+
+                    text++;
+                    text += ComputeWhitespaceLength( text );
+
+                    Value* member = nullptr;
+
+                    status = ParseValue( member, text, depth );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    member->name = static_cast<String<>&&>( name );
+
+                    int32 position = object->FindMemberPosition( member->name );
+
+                    if ( position < 0 )
+                    {
+                        status = MayThrow(
+                            [ & ]()
+                            {
+                                object->AppendMember( member );
+                                return Status::kOk;
+                            } );
+
+                        if ( status != Status::kOk )
+                        {
+                            delete member;
+                            return status;
+                        }
+                    }
+                    else if ( options.duplicateNames == DuplicateNames::kKeepLast )
+                    {
+                        object->ReplaceMember( position, member );
+                    }
+                    else
+                    {
+                        delete member;
+
+                        if ( options.duplicateNames == DuplicateNames::kReject )
+                        {
+                            text = nameStart;
+                            return Status::kDuplicateName;
+                        }
+                    }
+
+                    emptyObject = false;
+
+                    text += ComputeWhitespaceLength( text );
+
+                    if ( text[ 0 ] != ',' )
+                    {
+                        break;
+                    }
+                }
+
+                if ( text[ 0 ] != '}' )
+                {
+                    return Status::kExpectedClosingCurlyBracesOrComma;
+                }
+
+                text++;
+
+                return Status::kOk;
+            }
+        };
 
         ArrayValue::~ArrayValue()
         {
@@ -1496,18 +1491,162 @@ namespace C4
 
         Value::~Value() noexcept
         {
+            Detach();
         }
 
-        bool ObjectValue::InsertAccountedMapElement( Value* element ) noexcept
+        void Value::Detach() noexcept
         {
-            element->insertionSequence = nextInsertionSequence++;
+            if ( owner )
+            {
+                owner->RemoveMember( this );
+            }
+        }
 
-            return this->InsertMapElement( element );
+        // Objects with more members than this find a name through a hash index of member positions, smaller ones by
+        // comparing every name.
+        constexpr int32 indexedMemberCount = 16;
+
+        // FNV-1a.
+        uint32 HashName( const char* name ) noexcept
+        {
+            uint32 hash = 2166136261U;
+
+            for ( const uint8* byte = reinterpret_cast<const uint8*>( name ); byte[ 0 ] != 0; byte++ )
+            {
+                hash = ( hash ^ byte[ 0 ] ) * 16777619U;
+            }
+
+            return hash;
+        }
+
+        int32 ObjectValue::FindMemberPosition( const char* key ) const noexcept
+        {
+            int32 slotCount = memberIndex.GetArrayElementCount();
+
+            if ( slotCount == 0 )
+            {
+                for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
+                {
+                    const String<>& memberName = members[ a ]->name;
+
+                    if ( ( memberName[ 0 ] == key[ 0 ] ) && ( memberName == key ) )
+                    {
+                        return a;
+                    }
+                }
+
+                return -1;
+            }
+
+            for ( uint32 slot = HashName( key );; slot++ )
+            {
+                int32 position = memberIndex[ int32( slot & uint32( slotCount - 1 ) ) ] - 1;
+
+                if ( ( position < 0 ) || ( members[ position ]->name == key ) )
+                {
+                    return position;
+                }
+            }
+        }
+
+        void ObjectValue::IndexMember( int32 position ) noexcept
+        {
+            uint32 mask = uint32( memberIndex.GetArrayElementCount() - 1 );
+            uint32 slot = HashName( members[ position ]->name );
+
+            while ( memberIndex[ int32( slot & mask ) ] != 0 )
+            {
+                slot++;
+            }
+
+            memberIndex[ int32( slot & mask ) ] = position + 1;
+        }
+
+        void ObjectValue::ReindexMembers() noexcept
+        {
+            for ( int32& slot : memberIndex )
+            {
+                slot = 0;
+            }
+
+            for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
+            {
+                IndexMember( a );
+            }
+        }
+
+        void ObjectValue::AppendMember( Value* member )
+        {
+            int32 count = members.GetArrayElementCount() + 1;
+
+            if ( ( count > indexedMemberCount ) && ( 2 * count > memberIndex.GetArrayElementCount() ) )
+            {
+                int32 slotCount = 64;
+
+                while ( ( slotCount < 4 * int64( count ) ) && ( slotCount < 0x40000000 ) )
+                {
+                    slotCount *= 2;
+                }
+
+                memberIndex.SetArrayElementCount( slotCount );
+                ReindexMembers();
+            }
+
+            members.AppendArrayElement( member );
+            member->owner = this;
+
+            if ( memberIndex.GetArrayElementCount() != 0 )
+            {
+                IndexMember( count - 1 );
+            }
+        }
+
+        void ObjectValue::ReplaceMember( int32 position, Value* member ) noexcept
+        {
+            Value* replaced = members[ position ];
+
+            replaced->owner = nullptr;
+            delete replaced;
+
+            members[ position ] = member;
+            member->owner       = this;
+        }
+
+        void ObjectValue::RemoveMember( Value* member ) noexcept
+        {
+            for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
+            {
+                if ( members[ a ] == member )
+                {
+                    members.RemoveArrayElement( a );
+                    member->owner = nullptr;
+
+                    if ( memberIndex.GetArrayElementCount() != 0 )
+                    {
+                        ReindexMembers();
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        bool ObjectValue::InsertAccountedMapElement( Value* element )
+        {
+            if ( FindMemberPosition( element->name ) >= 0 )
+            {
+                return false;
+            }
+
+            element->Detach();
+            AppendMember( element );
+
+            return true;
         }
 
         Value* ObjectValue::RemoveAccountedMapElement( const char* key ) noexcept
         {
-            Value* element = FindValue( key );
+            Value* element = FindMapElement( key );
 
             if ( element )
             {
@@ -1519,110 +1658,19 @@ namespace C4
 
         void ObjectValue::PurgeAccountedMap() noexcept
         {
-            PurgeMap();
-        }
-
-        Status ObjectValue::Parse( ObjectValue* jsonObject, const char*& text, const ParseOptions& options, int32 depth ) noexcept
-        {
-            if ( text[ 0 ] != '{' )
+            for ( Value* member : members )
             {
-                return Status::kExpectedOpeningCurlyBraces;
+                member->owner = nullptr;
+                delete member;
             }
 
-            bool emptyObject = true;
-
-            for ( ;; )
-            {
-                text++;
-
-                text += ComputeWhitespaceLength( text );
-
-                if ( text[ 0 ] == '}' )
-                {
-                    if ( !emptyObject )
-                    {
-                        return Status::kExpectedJsonValue;
-                    }
-                    text++;
-
-                    return Status::kOk;
-                }
-
-                const char* nameStart = text;
-
-                String<> name;
-                Status   status = ParseStringLiteral( name, text );
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                text += ComputeWhitespaceLength( text );
-
-                if ( text[ 0 ] != ':' )
-                {
-                    return Status::kExpectedColon;
-                }
-
-                text++;
-                text += ComputeWhitespaceLength( text );
-
-                Value* jsonValue = nullptr;
-
-                status = ParseAnyValue( jsonValue, text, options, depth );
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                jsonValue->name = static_cast<String<>&&>( name );
-
-                if ( !jsonObject->InsertAccountedMapElement( jsonValue ) )
-                {
-                    if ( options.duplicateNames == DuplicateNames::kReject )
-                    {
-                        delete jsonValue;
-                        text = nameStart;
-                        return Status::kDuplicateName;
-                    }
-
-                    if ( options.duplicateNames == DuplicateNames::kKeepLast )
-                    {
-                        Value* existing = jsonObject->FindMapElement( jsonValue->name );
-
-                        jsonValue->insertionSequence = existing->insertionSequence;
-
-                        delete existing;
-                        jsonObject->InsertMapElement( jsonValue );
-                    }
-                    else
-                    {
-                        delete jsonValue;
-                    }
-                }
-
-                emptyObject = false;
-
-                text += ComputeWhitespaceLength( text );
-
-                if ( text[ 0 ] != ',' )
-                {
-                    break;
-                }
-            }
-
-            if ( text[ 0 ] != '}' )
-            {
-                return Status::kExpectedClosingCurlyBracesOrComma;
-            }
-
-            text++;
-
-            return Status::kOk;
+            members.PurgeArray();
+            memberIndex.PurgeArray();
         }
 
         ObjectValue::~ObjectValue() noexcept
         {
+            PurgeAccountedMap();
         }
 
         ObjectValue* ObjectValue::AsJsonObjectValue() noexcept
@@ -1635,32 +1683,21 @@ namespace C4
             return this;
         }
 
+        Value* ObjectValue::FindMapElement( const char* key ) const noexcept
+        {
+            int32 position = FindMemberPosition( key );
+
+            return ( position >= 0 ) ? members[ position ] : nullptr;
+        }
+
         Value* ObjectValue::FindValue( const char* key ) noexcept
         {
-            Value* value = nullptr;
-
-            MayThrow(
-                [ & ]()
-                {
-                    value = FindMapElement( key );
-                    return Status::kOk;
-                } );
-
-            return value;
+            return FindMapElement( key );
         }
 
         const Value* ObjectValue::FindValue( const char* key ) const noexcept
         {
-            const Value* value = nullptr;
-
-            MayThrow(
-                [ & ]()
-                {
-                    value = FindMapElement( key );
-                    return Status::kOk;
-                } );
-
-            return value;
+            return FindMapElement( key );
         }
 
         const String<>* ObjectValue::FindString( const char* key ) const noexcept
@@ -1725,39 +1762,7 @@ namespace C4
 
         Status ObjectValue::Write( Array<char>& output, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const
         {
-            Array<const Value*, 16> members;
-            Array<const Value*, 16> scratch;
-
-            for ( const Value* member : *this )
-            {
-                members.AppendArrayElement( member );
-            }
-
-            int32 count = members.GetArrayElementCount();
-            scratch.SetArrayElementCount( count );
-
-            for ( int64 width = 1; width < count; width *= 2 )
-            {
-                for ( int64 low = 0; low < count; low += 2 * width )
-                {
-                    int32 middle = int32( ( low + width < count ) ? low + width : count );
-                    int32 high   = int32( ( low + 2 * width < count ) ? low + 2 * width : count );
-                    int32 i      = int32( low );
-                    int32 j      = middle;
-
-                    for ( int32 k = int32( low ); k < high; k++ )
-                    {
-                        bool takeRight = ( j < high ) && ( ( i >= middle ) || ( members[ j ]->insertionSequence < members[ i ]->insertionSequence ) );
-                        scratch[ k ]   = takeRight ? members[ j++ ] : members[ i++ ];
-                    }
-                }
-
-                for ( int32 a = 0; a < count; a++ )
-                {
-                    members[ a ] = scratch[ a ];
-                }
-            }
-
+            int32  count  = members.GetArrayElementCount();
             Status status = AppendText( output, "{\n" );
 
             if ( status == Status::kOk )
@@ -1821,7 +1826,7 @@ namespace C4
             const char* end   = nullTerminatedCharArray.end() - 1;
             const char* text  = begin + ComputeWhitespaceLength( begin );
 
-            Status status = ParseAnyValue( jsonRoot, text, options, 0 );
+            Status status = Parser( end, options ).ParseValue( jsonRoot, text, 0 );
 
             if ( status == Status::kOk )
             {
