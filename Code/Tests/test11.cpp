@@ -173,6 +173,80 @@ void TestAccountedMap()
     Check( reparsed.GetRootJsonValue()->AsJsonObjectValue()->GetMapElementCount() == 0, "an empty object is written" );
 }
 
+Terathon::String<> LargeObjectText( int count, const char* extraMember )
+{
+    Terathon::String<> text = "{";
+    char               member[ 32 ];
+
+    for ( int a = 0; a < count; a++ )
+    {
+        snprintf( member, sizeof( member ), "%s\"k%d\":%d", ( a != 0 ) ? "," : "", a, a );
+        text += member;
+    }
+
+    text += extraMember;
+    text += "}";
+
+    return text;
+}
+
+void TestLargeObject()
+{
+    const int count = 100;
+    char      name[ 16 ];
+
+    Json::StructuredData sd;
+    CheckStatus( ParseText( sd, LargeObjectText( count, "" ) ).status, Json::Status::kOk, "parse an object with many members" );
+
+    Json::ObjectValue* root  = sd.GetRootJsonValue()->AsJsonObjectValue();
+    bool               found = ( root->GetMapElementCount() == count ) && !root->FindValue( "k100" );
+
+    for ( int a = 0; a < count; a++ )
+    {
+        snprintf( name, sizeof( name ), "k%d", a );
+        found = found && root->FindNumber( name ) && ( *root->FindNumber( name ) == a );
+    }
+
+    Check( found, "every member of a large object is found" );
+
+    int  position = 0;
+    bool ordered  = true;
+
+    for ( const Json::Value* value : *root )
+    {
+        snprintf( name, sizeof( name ), "k%d", position++ );
+        ordered = ordered && ( value->name == name );
+    }
+
+    Check( ordered, "a large object keeps document order" );
+
+    CheckStatus( ParseText( sd, LargeObjectText( count, ",\"k50\":-1" ) ).status, Json::Status::kDuplicateName, "a duplicate in a large object is rejected" );
+
+    Json::ParseOptions keepLast;
+    keepLast.duplicateNames = Json::DuplicateNames::kKeepLast;
+
+    CheckStatus( ParseText( sd, LargeObjectText( count, ",\"k50\":-1" ), keepLast ).status, Json::Status::kOk, "keep the last duplicate in a large object" );
+
+    root = sd.GetRootJsonValue()->AsJsonObjectValue();
+    Check( ( root->GetMapElementCount() == count ) && ( *root->FindNumber( "k50" ) == -1 ) && ( root->begin()[ 50 ]->name == "k50" ),
+           "the last value of a duplicate takes the first one's place" );
+
+    delete root->FindValue( "k10" );
+    Json::Value* removed = root->RemoveAccountedMapElement( "k20" );
+
+    found = ( removed != nullptr ) && ( root->GetMapElementCount() == count - 2 ) && !root->FindValue( "k10" ) && !root->FindValue( "k20" );
+
+    for ( int a = 0; a < count; a++ )
+    {
+        snprintf( name, sizeof( name ), "k%d", a );
+        found = found && ( ( a == 10 ) || ( a == 20 ) || root->FindValue( name ) );
+    }
+
+    Check( found, "members removed from a large object are gone and the others are still found" );
+    Check( root->InsertAccountedMapElement( removed ) && ( root->begin()[ count - 2 ] == removed ) && ( root->FindValue( "k20" ) == removed ),
+           "a member inserted again goes last and is found" );
+}
+
 int main()
 {
     TestDuplicateKeysRejected();
@@ -181,6 +255,7 @@ int main()
     TestOrderSurvivesDirectChanges();
     TestDuplicateNames();
     TestAccountedMap();
+    TestLargeObject();
 
     return TestResult();
 }

@@ -257,14 +257,12 @@ namespace C4
             using ElementType = ObjectMapElement<ValueType>;
         };
 
-        class Value : public Terathon::MapElement<Value>
+        class Value
         {
             friend class ObjectValue;
 
         private:
-            uint64 insertionSequence = 0;
-
-            using Terathon::MapElement<Value>::GetOwningMap;
+            ObjectValue* owner = nullptr;
 
             inline virtual String<>* GetStringData() noexcept
             {
@@ -326,7 +324,14 @@ namespace C4
                 return name;
             };
 
+            Value() = default;
+
+            Value( const Value& )            = delete;
+            Value& operator=( const Value& ) = delete;
+
             TERATHON_API virtual ~Value() noexcept;
+
+            TERATHON_API void Detach() noexcept;
 
             inline virtual ObjectValue* AsJsonObjectValue() noexcept
             {
@@ -518,9 +523,6 @@ namespace C4
         class ArrayValue final : public Value
         {
         public:
-            static Status Parse( ArrayValue* jsonArray, const char*& text, const ParseOptions& options, int32 depth ) noexcept;
-
-        public:
             using DataType = Array<Value*>;
 
             DataType data;
@@ -537,21 +539,38 @@ namespace C4
                                        Array<char>& indentationCharArray ) const override;
         };
 
-        class ObjectValue final : public Value, private Map<Value>
+        class ObjectValue final : public Value
         {
+            friend class Value;
+            friend class Parser;
+
         private:
-            uint64 nextInsertionSequence = 0;
+            Array<Value*, 8> members;
+            Array<int32>     memberIndex;
+
+            int32 FindMemberPosition( const char* key ) const noexcept;
+            void  IndexMember( int32 position ) noexcept;
+            void  ReindexMembers() noexcept;
+            void  AppendMember( Value* member );
+            void  ReplaceMember( int32 position, Value* member ) noexcept;
+            void  RemoveMember( Value* member ) noexcept;
 
         public:
-            using Map<Value>::begin;
-            using Map<Value>::end;
-            using Map<Value>::FindMapElement;
-            using Map<Value>::GetMapElementCount;
+            Value* const* begin() const noexcept
+            {
+                return members.begin();
+            }
 
-        public:
-            static Status Parse( ObjectValue* jsonObjectValue, const char*& text, const ParseOptions& options, int32 depth ) noexcept;
+            Value* const* end() const noexcept
+            {
+                return members.end();
+            }
 
-        public:
+            int32 GetMapElementCount() const noexcept
+            {
+                return members.GetArrayElementCount();
+            }
+
             TERATHON_API ~ObjectValue() noexcept override;
 
             TERATHON_API ObjectValue*       AsJsonObjectValue() noexcept override;
@@ -559,6 +578,7 @@ namespace C4
 
             TERATHON_API Value*       FindValue( const char* key ) noexcept;
             TERATHON_API const Value* FindValue( const char* key ) const noexcept;
+            TERATHON_API Value*       FindMapElement( const char* key ) const noexcept;
 
             TERATHON_API const String<>* FindString( const char* key ) const noexcept;
             TERATHON_API const double*   FindNumber( const char* key ) const noexcept;
@@ -567,7 +587,7 @@ namespace C4
             TERATHON_API const Array<Value*>* FindJsonValueArray( const char* key ) const noexcept;
             TERATHON_API const ObjectValue*   FindJsonObjectValue( const char* key ) const noexcept;
 
-            TERATHON_API bool   InsertAccountedMapElement( Value* element ) noexcept;
+            TERATHON_API bool   InsertAccountedMapElement( Value* element );
             TERATHON_API Value* RemoveAccountedMapElement( const char* key ) noexcept;
             TERATHON_API void   PurgeAccountedMap() noexcept;
 
