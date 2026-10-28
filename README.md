@@ -102,6 +102,13 @@ auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", option
 ### Numbers
 Numbers are read correctly rounded and written in the shortest form that reads back to the same value, with the same results in every build and locale. Values from 1e-6 up to 1e21 are written as plain decimals and others in exponent form, for example ```1e+21``` and ```1e-7```.
 
+### Version 2.2
+* Parsing and writing are faster, most of all for documents with many strings and objects.
+* Objects keep their members in document order: iterating over an ```ObjectValue``` visits them in the order they were read or inserted, the order ```Write``` uses.
+* ```Value``` is no longer a Terathon ```MapElement```. A member still leaves its object when it is deleted, detached with ```Value::Detach``` or inserted into another object.
+* ```InsertAccountedMapElement``` allocates and is no longer ```noexcept```.
+* ```ArrayValue::Parse``` and ```ObjectValue::Parse``` are no longer public, and values can no longer be copied.
+
 ### Version 2.1
 * Numbers are converted with the NumberText header in every build, including inside the C4 Engine, so parsing and writing numbers is much faster and gives the same results everywhere.
 * Outside the C4 Engine, the layout of written numbers changes for very large and very small values: for example ```1e+15``` is now written as ```1000000000000000``` and ```1e-05``` as ```0.00001```. The values read back exactly as before.
@@ -135,7 +142,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v2.1.0 # Or whatever version you select
+  GIT_TAG v2.2.0 # Or whatever version you select
   GIT_SHALLOW TRUE
 )
 
