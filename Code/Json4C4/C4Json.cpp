@@ -649,6 +649,14 @@ namespace C4
             return Status::kOk;
         }
 
+        inline void CopyText( char* restrict destination, const char* restrict source, int32 length ) noexcept
+        {
+            for ( int32 a = 0; a < length; a++ )
+            {
+                destination[ a ] = source[ a ];
+            }
+        }
+
         Status AppendText( Array<char>& output, const char* text, int32 length )
         {
             int32 count = output.GetArrayElementCount();
@@ -659,11 +667,7 @@ namespace C4
             }
 
             output.SetArrayElementCount( count + length );
-
-            for ( int32 a = 0; a < length; a++ )
-            {
-                output[ count + a ] = text[ a ];
-            }
+            CopyText( output.begin() + count, text, length );
 
             return Status::kOk;
         }
@@ -673,19 +677,53 @@ namespace C4
             return AppendText( output, text, Text::GetTextLength( text ) );
         }
 
+        // The length of the character at byte when a string literal holds it unescaped, or 0 when it has to be escaped or is
+        // not valid UTF-8.
+        inline int32 GetPlainCharLength( const uint8* byte ) noexcept
+        {
+            uint32 c = byte[ 0 ];
+
+            if ( c < 0x80U )
+            {
+                return ( ( c >= 0x20U ) && ( c != '"' ) && ( c != '\\' ) );
+            }
+
+            int32 length = Text::ValidateUnicodeChar( reinterpret_cast<const char*>( byte ) );
+
+            return ( ( c == 0xEDU ) && ( byte[ 1 ] >= 0xA0U ) ) ? 0 : length;
+        }
+
         Status AppendEscapedString( Array<char>& output, const char* text )
         {
             static const char hexadecimalDigit[] = "0123456789abcdef";
 
             Status status = AppendText( output, "\"", 1 );
 
-            for ( const uint8* byte = reinterpret_cast<const uint8*>( text ); status == Status::kOk && byte[ 0 ] != 0; )
+            for ( const uint8* byte = reinterpret_cast<const uint8*>( text ); status == Status::kOk; )
             {
+                const uint8* run = byte;
+
+                while ( int32 length = GetPlainCharLength( byte ) )
+                {
+                    byte += length;
+                }
+
+                status = AppendText( output, reinterpret_cast<const char*>( run ), int32( byte - run ) );
+
                 uint8 c = byte[ 0 ];
 
-                char        escape[ 6 ] = { '\\', char( c ), 0, 0, 0, 0 };
-                const char* piece       = escape;
-                int32       pieceLength = 2;
+                if ( ( status != Status::kOk ) || ( c == 0 ) )
+                {
+                    break;
+                }
+
+                if ( c >= 0x80U )
+                {
+                    return Status::kStringIllegalChar;
+                }
+
+                char  escape[ 6 ]  = { '\\', char( c ), 0, 0, 0, 0 };
+                int32 escapeLength = 2;
 
                 if ( c == '\b' )
                 {
@@ -709,26 +747,16 @@ namespace C4
                 }
                 else if ( c < 0x20 )
                 {
-                    escape[ 1 ] = 'u';
-                    escape[ 2 ] = '0';
-                    escape[ 3 ] = '0';
-                    escape[ 4 ] = hexadecimalDigit[ c >> 4 ];
-                    escape[ 5 ] = hexadecimalDigit[ c & 0x0F ];
-                    pieceLength = 6;
-                }
-                else if ( ( c != '"' ) && ( c != '\\' ) )
-                {
-                    piece       = reinterpret_cast<const char*>( byte );
-                    pieceLength = Text::ValidateUnicodeChar( piece );
-
-                    if ( ( pieceLength == 0 ) || ( ( c == 0xEDU ) && ( byte[ 1 ] >= 0xA0U ) ) )
-                    {
-                        return Status::kStringIllegalChar;
-                    }
+                    escape[ 1 ]  = 'u';
+                    escape[ 2 ]  = '0';
+                    escape[ 3 ]  = '0';
+                    escape[ 4 ]  = hexadecimalDigit[ c >> 4 ];
+                    escape[ 5 ]  = hexadecimalDigit[ c & 0x0F ];
+                    escapeLength = 6;
                 }
 
-                status = AppendText( output, piece, pieceLength );
-                byte += ( piece == escape ) ? 1 : pieceLength;
+                status = AppendText( output, escape, escapeLength );
+                byte++;
             }
 
             return ( status == Status::kOk ) ? AppendText( output, "\"", 1 ) : status;
@@ -950,65 +978,51 @@ namespace C4
 
             for ( ;; )
             {
+                const uint8* run = byte;
+
+                while ( int32 length = GetPlainCharLength( byte ) )
+                {
+                    byte += length;
+                }
+
+                int32 runLength = int32( byte - run );
+
+                if ( string )
+                {
+                    CopyText( string, reinterpret_cast<const char*>( run ), runLength );
+                    string += runLength;
+                }
+
+                count += runLength;
+
                 uint32 c = byte[ 0 ];
-                if ( c == 0 )
-                {
-                    status = Status::kPrematureNullTerminator;
-                    break;
-                }
-
-                if ( c == '\"' )
-                {
-                    break;
-                }
-
-                if ( c < 32U )
-                {
-                    status = Status::kStringIllegalChar;
-                    break;
-                }
 
                 if ( c != '\\' )
                 {
-                    int32 len = Text::ValidateUnicodeChar( reinterpret_cast<const char*>( byte ) );
-                    if ( ( len == 0 ) || ( ( c == 0xEDU ) && ( byte[ 1 ] >= 0xA0U ) ) )
+                    if ( c != '\"' )
                     {
-                        status = Status::kStringIllegalChar;
-                        break;
+                        status = ( c == 0 ) ? Status::kPrematureNullTerminator : Status::kStringIllegalChar;
                     }
 
-                    if ( string )
-                    {
-                        for ( machine a = 0; a < len; a++ )
-                        {
-                            string[ a ] = char( byte[ a ] );
-                        }
-
-                        string += len;
-                    }
-
-                    byte += len;
-                    count += len;
+                    break;
                 }
-                else
+
+                int32 stringLen;
+
+                int32 textLen = ReadStringEscapeChar( reinterpret_cast<const char*>( byte + 1 ), &stringLen, string );
+                if ( textLen == 0 )
                 {
-                    int32 stringLen;
-
-                    int32 textLen = ReadStringEscapeChar( reinterpret_cast<const char*>( byte + 1 ), &stringLen, string );
-                    if ( textLen == 0 )
-                    {
-                        status = Status::kStringIllegalEscape;
-                        break;
-                    }
-
-                    if ( string )
-                    {
-                        string += stringLen;
-                    }
-
-                    byte += textLen + 1;
-                    count += stringLen;
+                    status = Status::kStringIllegalEscape;
+                    break;
                 }
+
+                if ( string )
+                {
+                    string += stringLen;
+                }
+
+                byte += textLen + 1;
+                count += stringLen;
             }
 
             *textLength   = int32( reinterpret_cast<const char*>( byte ) - text );
