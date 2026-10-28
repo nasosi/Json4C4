@@ -1131,48 +1131,57 @@ namespace C4
             }
         }
 
+        Status ParseStringLiteral( String<>& string, const char*& text ) noexcept
+        {
+            if ( text[ 0 ] != '"' )
+            {
+                return ( Status::kExpectedBeginingDoubleQuotes );
+            }
+
+            int32 textLength;
+            int32 stringLength;
+
+            text++;
+
+            Status status = ReadStringLiteral( text, &textLength, &stringLength );
+            if ( status != Status::kOk )
+            {
+                text += textLength;
+                return ( status );
+            }
+
+            status = MayThrow(
+                [ & ]()
+                {
+                    string.SetStringLength( stringLength );
+                    return Status::kOk;
+                } );
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            if ( stringLength == textLength )
+            {
+                CopyText( string, text, stringLength );
+            }
+            else
+            {
+                ReadStringLiteral( text, &textLength, &stringLength, string );
+            }
+
+            text += textLength + 1;
+
+            return ( Status::kOk );
+        }
+
         class StringValue final : public Value
         {
         public:
             static Status Parse( StringValue* jsonStringValue, const char*& text ) noexcept
             {
-                if ( text[ 0 ] != '"' )
-                {
-                    return ( Status::kExpectedBeginingDoubleQuotes );
-                }
-
-                int32 textLength;
-                int32 stringLength;
-
-                text++;
-
-                Status status = ReadStringLiteral( text, &textLength, &stringLength );
-                if ( status != Status::kOk )
-                {
-                    text += textLength;
-                    return ( status );
-                }
-
-                if ( jsonStringValue )
-                {
-                    status = MayThrow(
-                        [ & ]()
-                        {
-                            jsonStringValue->data.SetStringLength( stringLength );
-                            return Status::kOk;
-                        } );
-
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    ReadStringLiteral( text, &textLength, &stringLength, jsonStringValue->data );
-                }
-
-                text += textLength + 1;
-
-                return ( Status::kOk );
+                return ParseStringLiteral( jsonStringValue->data, text );
             }
 
         public:
@@ -1491,11 +1500,6 @@ namespace C4
 
         bool ObjectValue::InsertAccountedMapElement( Value* element ) noexcept
         {
-            if ( FindMapElement( element->name ) )
-            {
-                return false;
-            }
-
             element->insertionSequence = nextInsertionSequence++;
 
             return this->InsertMapElement( element );
@@ -1546,8 +1550,8 @@ namespace C4
 
                 const char* nameStart = text;
 
-                StringValue name;
-                Status      status = StringValue::Parse( &name, text );
+                String<> name;
+                Status   status = ParseStringLiteral( name, text );
                 if ( status != Status::kOk )
                 {
                     return status;
@@ -1571,9 +1575,9 @@ namespace C4
                     return status;
                 }
 
-                jsonValue->name = static_cast<String<>&&>( name.data );
+                jsonValue->name = static_cast<String<>&&>( name );
 
-                if ( Value* existing = jsonObject->FindMapElement( jsonValue->name ) )
+                if ( !jsonObject->InsertAccountedMapElement( jsonValue ) )
                 {
                     if ( options.duplicateNames == DuplicateNames::kReject )
                     {
@@ -1584,6 +1588,8 @@ namespace C4
 
                     if ( options.duplicateNames == DuplicateNames::kKeepLast )
                     {
+                        Value* existing = jsonObject->FindMapElement( jsonValue->name );
+
                         jsonValue->insertionSequence = existing->insertionSequence;
 
                         delete existing;
@@ -1592,21 +1598,6 @@ namespace C4
                     else
                     {
                         delete jsonValue;
-                    }
-                }
-                else
-                {
-                    status = MayThrow(
-                        [ & ]()
-                        {
-                            jsonObject->InsertAccountedMapElement( jsonValue );
-                            return Status::kOk;
-                        } );
-
-                    if ( status != Status::kOk )
-                    {
-                        delete jsonValue;
-                        return status;
                     }
                 }
 
@@ -1734,20 +1725,16 @@ namespace C4
 
         Status ObjectValue::Write( Array<char>& output, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const
         {
-            int32 count = GetMapElementCount();
-
-            Array<const Value*> members;
-            Array<const Value*> scratch;
-
-            members.SetArrayElementCount( count );
-            scratch.SetArrayElementCount( count );
-
-            int32 index = 0;
+            Array<const Value*, 16> members;
+            Array<const Value*, 16> scratch;
 
             for ( const Value* member : *this )
             {
-                members[ index++ ] = member;
+                members.AppendArrayElement( member );
             }
+
+            int32 count = members.GetArrayElementCount();
+            scratch.SetArrayElementCount( count );
 
             for ( int64 width = 1; width < count; width *= 2 )
             {
