@@ -9,7 +9,7 @@ Json4C4 is a general-purpose JSON library developed to integrate well with the [
 
 Json4C4 is appropriate for parsing, deserialization, serialization, and validation. The library provides ways for the simple definition of the data structure prototype to enable seamless interoperability with user-defined objects. It is compliant with the [RFC 8259 (STD90) standard](https://datatracker.ietf.org/doc/html/rfc8259) and supports accurate JSON file syntax-error reporting. It is fast, and its number conversions are exact and identical in every build.
 
-Json4C4  has no external dependencies. It internally uses parts of the [Terathon Container](https://github.com/EricLengyel/Terathon-Container-Library), the [OpenDDL Reference Implementation](https://github.com/EricLengyel/OpenDDL) and  [Terathon Math](https://github.com/EricLengyel/Terathon-Math-Library) libraries, and the NumberText header for number conversions.
+Json4C4  has no external dependencies. It internally uses parts of the [Terathon Container](https://github.com/EricLengyel/Terathon-Container-Library), the [OpenDDL Reference Implementation](https://github.com/EricLengyel/OpenDDL) and  [Terathon Math](https://github.com/EricLengyel/Terathon-Math-Library) libraries, and the [NumberTextThree](https://github.com/nasosi/NumberTextThree) header for number conversions.
 
 ## Simple example
 The use of Json4C4 includes three main steps. Assume for example a ```struct``` like the following:
@@ -127,7 +127,7 @@ Version 2.0 changes the following, and code written for 1.x may need updating:
 * ```Value::Write``` writes into an ```Array<char>```.
 
 ## Integrating into the C4 Engine Visual Studio solution
-First, copy the ```C4Json.h``` and ```C4Json.cpp``` files from the ```Code/Json4C4``` subfolder and the ```NumberText.h``` file from the ```Code/NumberText``` subfolder into the C4 Engine ```EngineCode``` directory. Subsequently, add the three files to the ```Engine``` project by right-clicking on the ```System``` filter under the ```Engine``` project in the ```Solution Explorer``` and selecting ```Add->Existing Item```.
+First, copy the ```C4Json.h``` and ```C4Json.cpp``` files from the ```Code/Json4C4``` subfolder and the ```NumberTextThree.h``` file from the ```Code/NumberTextThree``` subfolder into the C4 Engine ```EngineCode``` directory. Subsequently, add the three files to the ```Engine``` project by right-clicking on the ```System``` filter under the ```Engine``` project in the ```Solution Explorer``` and selecting ```Add->Existing Item```.
 
 Include by ```#include <C4Json.h>``` to use from your application code. Note that this is different from when using the library outside the C4 Engine, where you need ```#include <Json4C4/C4Json.h>```.
 

@@ -55,15 +55,15 @@
 
 #include "C4Json.h"
 
-// Without system headers, Terathon declares its own SSE types, which clash with the <emmintrin.h> that NumberText
+// Without system headers, Terathon declares its own SSE types, which clash with the <emmintrin.h> that NumberTextThree
 // includes for its SIMD digits.
-#if defined( TERATHON_NO_SYSTEM ) && !defined( NUMBERTEXT_NO_SIMD )
+#if defined( TERATHON_NO_SYSTEM ) && !defined( NUMBERTEXTTHREE_NO_SIMD )
 
-#    define NUMBERTEXT_NO_SIMD
+#    define NUMBERTEXTTHREE_NO_SIMD
 
 #endif
 
-#include "NumberText.h"
+#include "NumberTextThree.h"
 
 #if defined( _MSC_VER )
 
@@ -1057,9 +1057,9 @@ namespace C4
                     return Status::kFloatInvalid;
                 }
 
-                char text[ NUMBERTEXT_F64_MAX_CHARS ];
+                char text[ NUMBERTEXTTHREE_F64_MAX_CHARS ];
 
-                return AppendText( output, text, nt_write_f64( data, text ) );
+                return AppendText( output, text, ntt_write_f64( data, text ) );
             }
         };
 
@@ -1226,9 +1226,9 @@ namespace C4
             {
                 const char* stop;
 
-                // A number out of range keeps the value NumberText gives it, and Write refuses an infinity. The only invalid
-                // number NumberText stops at a digit is one with a leading zero.
-                if ( nt_parse_json_f64( text, end, &value->data, &stop ) == NUMBERTEXT_INVALID )
+                // A number out of range keeps the value NumberTextThree gives it, and Write refuses an infinity. The only
+                // invalid number NumberTextThree stops at a digit is one with a leading zero.
+                if ( ntt_parse_json_f64( text, end, &value->data, &stop ) == NUMBERTEXTTHREE_INVALID )
                 {
                     return IsDigit( uint8( stop[ 0 ] ) ) ? Status::kNumbersCannotHaveLeadingZeros : Status::kFloatInvalid;
                 }

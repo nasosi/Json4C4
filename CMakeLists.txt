@@ -161,7 +161,7 @@ target_include_directories( Json4C4
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Code>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Code/Terathon>
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/Code/NumberText
+        ${CMAKE_CURRENT_SOURCE_DIR}/Code/NumberTextThree
 )
 
 

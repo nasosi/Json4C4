@@ -113,5 +113,5 @@ jobs:
       run: |
         for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VisualStudioPath=%%i"
         call "%VisualStudioPath%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-        cl /nologo /c /O2 /std:c++17 /W4 /WX /EHsc /DTERATHON_NO_SYSTEM /ICode\Json4C4 /ICode\Terathon /ICode\NumberText Code\Json4C4\C4Json.cpp /FoC4JsonExceptions.obj || exit /b 1
-        cl /nologo /c /O2 /std:c++17 /W4 /WX /EHs-c- /D_HAS_EXCEPTIONS=0 /DTERATHON_NO_SYSTEM /ICode\Json4C4 /ICode\Terathon /ICode\NumberText Code\Json4C4\C4Json.cpp /FoC4JsonNoExceptions.obj || exit /b 1
+        cl /nologo /c /O2 /std:c++17 /W4 /WX /EHsc /DTERATHON_NO_SYSTEM /ICode\Json4C4 /ICode\Terathon /ICode\NumberTextThree Code\Json4C4\C4Json.cpp /FoC4JsonExceptions.obj || exit /b 1
+        cl /nologo /c /O2 /std:c++17 /W4 /WX /EHs-c- /D_HAS_EXCEPTIONS=0 /DTERATHON_NO_SYSTEM /ICode\Json4C4 /ICode\Terathon /ICode\NumberTextThree Code\Json4C4\C4Json.cpp /FoC4JsonNoExceptions.obj || exit /b 1
