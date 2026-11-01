@@ -102,6 +102,9 @@ auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", option
 ### Numbers
 Numbers are read correctly rounded and written in the shortest form that reads back to the same value, with the same results in every build and locale. Values from 1e-6 up to 1e21 are written as plain decimals and others in exponent form, for example ```1e+21``` and ```1e-7```.
 
+### Version 2.2.1
+* Numbers are converted with the NumberTextThree header, which replaces NumberText. Inside the C4 Engine, copy ```NumberTextThree.h``` from ```Code/NumberTextThree``` instead of ```NumberText.h```. Numbers are read faster, and read and write exactly as before.
+
 ### Version 2.2
 * Parsing and writing are faster, most of all for documents with many strings and objects.
 * Objects keep their members in document order: iterating over an ```ObjectValue``` visits them in the order they were read or inserted, the order ```Write``` uses.
@@ -142,7 +145,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v2.2.0 # Or whatever version you select
+  GIT_TAG v2.2.1 # Or whatever version you select
   GIT_SHALLOW TRUE
 )
 
