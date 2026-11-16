@@ -608,11 +608,12 @@ namespace C4
                                                     "Could not write file",
                                                     "Maximum value count exceeded",
                                                     "Maximum string byte count exceeded",
-                                                    "A block source refused an allocation" };
+                                                    "A block source refused an allocation",
+                                                    "String holds a zero character" };
 
         constexpr unsigned int statusStringCount = sizeof( StatusString ) / sizeof( StatusString[ 0 ] );
 
-        static_assert( statusStringCount == (unsigned int)( Status::kAllocationRefused ) + 1, "StatusString must have one entry per Status" );
+        static_assert( statusStringCount == (unsigned int)( Status::kStringHoldsZero ) + 1, "StatusString must have one entry per Status" );
 
         TERATHON_API String<256> StatusToString( const Status& status ) noexcept
         {
@@ -2153,6 +2154,24 @@ namespace C4
             return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
         }
 
+        void FindLineAndColumn( const char* begin, const char* end, const char* position, int32* line, int32* column ) noexcept
+        {
+            int32       lineNumber = 1;
+            const char* lineStart  = begin;
+
+            for ( const char* c = begin; c != position; c++ )
+            {
+                if ( ( c[ 0 ] == '\n' ) || ( ( c[ 0 ] == '\r' ) && ( ( c + 1 == end ) || ( c[ 1 ] != '\n' ) ) ) )
+                {
+                    lineNumber++;
+                    lineStart = c + 1;
+                }
+            }
+
+            *line   = lineNumber;
+            *column = int32( position - lineStart ) + 1;
+        }
+
         template <class ParserType, class RootType>
         Status ParseRoot( ParserType& parser, RootType& root, const char* begin, const char* end, int32* errorLine, int32* errorColumn ) noexcept
         {
@@ -2175,20 +2194,7 @@ namespace C4
 
             if ( status != Status::kOk )
             {
-                int32       line      = 1;
-                const char* lineStart = begin;
-
-                for ( const char* c = begin; c != text; c++ )
-                {
-                    if ( ( c[ 0 ] == '\n' ) || ( ( c[ 0 ] == '\r' ) && ( ( c + 1 == end ) || ( c[ 1 ] != '\n' ) ) ) )
-                    {
-                        line++;
-                        lineStart = c + 1;
-                    }
-                }
-
-                *errorLine   = line;
-                *errorColumn = int32( text - lineStart ) + 1;
+                FindLineAndColumn( begin, end, text, errorLine, errorColumn );
             }
 
             return status;
@@ -3699,6 +3705,347 @@ namespace C4
                 Status      status = Write( output, indentationLength, indentationChar );
 
                 return ( status == Status::kOk ) ? WriteTextFile( fileName, output ) : status;
+            }
+
+            Status ValidateTraced( const Value& value, const String<>&, ReadPath& ) noexcept
+            {
+                StringView string = value.AsString();
+
+                if ( !string )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                return Detail::HoldsZero( string ) ? Status::kStringHoldsZero : Status::kOk;
+            }
+
+            Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept
+            {
+                Status status = ValidateTraced( value, data, path );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                StringView string = value.AsString();
+
+                return MayThrow(
+                    [ & ]()
+                    {
+                        String<> copy( string.GetText(), int32( string.GetLength() ) );
+                        data = static_cast<String<>&&>( copy );
+
+                        return Status::kOk;
+                    } );
+            }
+
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+
+            Status ValidateTraced( const Value& value, const std::string&, ReadPath& ) noexcept
+            {
+                return value.AsString() ? Status::kOk : Status::kInvalidValueType;
+            }
+
+            Status DeserializeTraced( const Value& value, std::string& data, ReadPath& ) noexcept
+            {
+                StringView string = value.AsString();
+
+                if ( !string )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
+                    {
+                        std::string copy( string.GetText(), string.GetLength() );
+                        data.swap( copy );
+
+                        return Status::kOk;
+                    } );
+            }
+
+#endif
+
+            Status ReadTextFile( const char* fileName, Array<char>& text ) noexcept
+            {
+                File       file;
+                FileStatus fileStatus = kFileOpenFailed;
+
+                MayThrow(
+                    [ & ]()
+                    {
+                        fileStatus = file.OpenFile( fileName, kFileReadOnly );
+                        return Status::kOk;
+                    } );
+
+                if ( fileStatus != kFileOkay )
+                {
+                    return Status::kFileOpenError;
+                }
+
+                uint64 fileSize = file.GetFileSize();
+
+                if ( fileSize > JSON4C4_MAX_FILE_SIZE )
+                {
+                    return Status::kFileTooLarge;
+                }
+
+                Status status = MayThrow(
+                    [ & ]()
+                    {
+                        text.SetArrayElementCount( int32( fileSize ) );
+                        return Status::kOk;
+                    } );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                return ( ( fileSize == 0 ) || ( file.ReadFile( text.begin(), fileSize ) == kFileOkay ) ) ? Status::kOk : Status::kFileReadError;
+            }
+
+            // Finds where the value that a read path leads to begins in a text that parsed.
+            class TextLocator : public TextReader
+            {
+            public:
+                TextLocator( const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
+                    TextReader( begin, textEnd, parseOptions, true ),
+                    textBegin( begin )
+                {
+                }
+
+                // The object that misses a member, when the path ends with one.
+                const char* Find( const ReadPath& path ) noexcept
+                {
+                    const char* text = SkipWhitespace( textBegin );
+
+                    for ( int32 a = path.GetSegmentCount() - 1; ( a >= 0 ) && text; a-- )
+                    {
+                        const ReadPath::Segment& segment = path.GetSegment( a );
+
+                        if ( segment.missing )
+                        {
+                            break;
+                        }
+
+                        text = segment.name ? FindMember( text, segment ) : FindElement( text, segment.index );
+                    }
+
+                    return text;
+                }
+
+            private:
+                const char* textBegin;
+
+                const char* SkipString( const char* text ) const noexcept
+                {
+                    int32 textLength;
+                    int32 stringLength;
+
+                    if ( ( Peek( text ) != '"' ) || ( ReadStringLiteral( text + 1, &textLength, &stringLength ) != Status::kOk ) )
+                    {
+                        return nullptr;
+                    }
+
+                    return text + textLength + 2;
+                }
+
+                const char* SkipValue( const char* text ) const noexcept
+                {
+                    switch ( Peek( text ) )
+                    {
+                        case '"':
+                            return SkipString( text );
+
+                        case '[':
+                        case '{':
+                            return SkipContainer( text );
+
+                        case 't':
+                        case 'f':
+                        {
+                            bool boolean;
+                            return ( ReadBool( boolean, text ) == Status::kOk ) ? text : nullptr;
+                        }
+
+                        case 'n':
+                            return ( ReadNull( text ) == Status::kOk ) ? text : nullptr;
+
+                        default:
+                        {
+                            double number;
+                            return ( ReadNumber( number, text ) == Status::kOk ) ? text : nullptr;
+                        }
+                    }
+                }
+
+                const char* SkipContainer( const char* text ) const noexcept
+                {
+                    uint32 close = ( text[ 0 ] == '[' ) ? ']' : '}';
+
+                    text = SkipWhitespace( text + 1 );
+
+                    while ( text && ( Peek( text ) != close ) )
+                    {
+                        if ( close == '}' )
+                        {
+                            text = SkipString( text );
+                            text = text ? SkipWhitespace( text ) : nullptr;
+                            text = ( text && ( Peek( text ) == ':' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+                        }
+
+                        text = text ? SkipValue( text ) : nullptr;
+                        text = text ? SkipWhitespace( text ) : nullptr;
+
+                        if ( text && ( Peek( text ) == ',' ) )
+                        {
+                            text = SkipWhitespace( text + 1 );
+                        }
+                        else if ( text && ( Peek( text ) != close ) )
+                        {
+                            text = nullptr;
+                        }
+                    }
+
+                    return text ? text + 1 : nullptr;
+                }
+
+                const char* FindElement( const char* text, uint32 index ) const noexcept
+                {
+                    if ( Peek( text ) != '[' )
+                    {
+                        return nullptr;
+                    }
+
+                    text = SkipWhitespace( text + 1 );
+
+                    for ( uint32 a = 0; ( a < index ) && text; a++ )
+                    {
+                        text = SkipValue( text );
+                        text = text ? SkipWhitespace( text ) : nullptr;
+                        text = ( text && ( Peek( text ) == ',' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+                    }
+
+                    return text;
+                }
+
+                // With kKeepLast a repeated name keeps the value of its last occurrence, otherwise of its first.
+                const char* FindMember( const char* text, const ReadPath::Segment& segment ) noexcept
+                {
+                    if ( Peek( text ) != '{' )
+                    {
+                        return nullptr;
+                    }
+
+                    const char* found = nullptr;
+
+                    text = SkipWhitespace( text + 1 );
+
+                    while ( text && ( Peek( text ) == '"' ) )
+                    {
+                        bool same = IsName( text, segment );
+
+                        text = SkipString( text );
+                        text = text ? SkipWhitespace( text ) : nullptr;
+                        text = ( text && ( Peek( text ) == ':' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+
+                        if ( text && same )
+                        {
+                            found = text;
+
+                            if ( options.duplicateNames != DuplicateNames::kKeepLast )
+                            {
+                                break;
+                            }
+                        }
+
+                        text = text ? SkipValue( text ) : nullptr;
+                        text = text ? SkipWhitespace( text ) : nullptr;
+                        text = ( text && ( Peek( text ) == ',' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+                    }
+
+                    return found;
+                }
+
+                bool IsName( const char* text, const ReadPath::Segment& segment ) const noexcept
+                {
+                    int32 textLength;
+                    int32 stringLength;
+
+                    if ( ( ReadStringLiteral( text + 1, &textLength, &stringLength ) != Status::kOk ) || ( uint32( stringLength ) != segment.length ) )
+                    {
+                        return false;
+                    }
+
+                    if ( stringLength == textLength )
+                    {
+                        return SameName( text + 1, uint32( stringLength ), segment.name, segment.length );
+                    }
+
+                    Array<char> name;
+                    bool        same = false;
+
+                    MayThrow(
+                        [ & ]()
+                        {
+                            name.SetArrayElementCount( stringLength );
+                            ReadStringLiteral( text + 1, &textLength, &stringLength, name.begin() );
+                            same = SameName( name.begin(), uint32( stringLength ), segment.name, segment.length );
+
+                            return Status::kOk;
+                        } );
+
+                    return same;
+                }
+            };
+
+            void LocateReadFailure( const char* text, uint64 length, const ParseOptions& options, const ReadPath& path, ReadResult& result ) noexcept
+            {
+                MayThrow(
+                    [ & ]()
+                    {
+                        String<> pathText;
+
+                        for ( int32 a = path.GetSegmentCount() - 1; a >= 0; a-- )
+                        {
+                            const ReadPath::Segment& segment = path.GetSegment( a );
+
+                            if ( !segment.name )
+                            {
+                                pathText += "[";
+                                pathText += String<>( segment.index );
+                                pathText += "]";
+
+                                continue;
+                            }
+
+                            if ( pathText.GetStringLength() != 0 )
+                            {
+                                pathText += ".";
+                            }
+
+                            for ( uint32 b = 0; b < segment.length; b++ )
+                            {
+                                char c[ 2 ] = { segment.name[ b ], 0 };
+                                pathText += ( c[ 0 ] != 0 ) ? c : "\\u0000";
+                            }
+                        }
+
+                        result.path = static_cast<String<>&&>( pathText );
+
+                        return Status::kOk;
+                    } );
+
+                TextLocator locator( text, text + length, options );
+                const char* position = locator.Find( path );
+
+                if ( position )
+                {
+                    FindLineAndColumn( text, text + length, position, &result.errorLine, &result.errorColumn );
+                }
             }
         } // namespace V3
 

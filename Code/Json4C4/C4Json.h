@@ -185,7 +185,8 @@ namespace C4
             kFileWriteError,
             kMaximumValueCountExceeded,
             kMaximumStringByteCountExceeded,
-            kAllocationRefused
+            kAllocationRefused,
+            kStringHoldsZero
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -1999,6 +2000,9 @@ namespace C4
                     return root;
                 }
 
+                template <class T>
+                Status DeserializeTo( T& data ) const noexcept;
+
                 TERATHON_API void Clear() noexcept;
 
             private:
@@ -2019,6 +2023,739 @@ namespace C4
                 char* AllocateBytes( uint64 size ) noexcept;
                 void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
             };
+
+            // The names and array indices from the root to the value at fault when a read fails, innermost first. The
+            // traced functions add to it as they return a failure.
+            class ReadPath
+            {
+            public:
+                struct Segment
+                {
+                    const char* name; // nullptr for an array index
+                    uint32      length;
+                    uint32      index;
+                    bool        missing; // a member the object does not have
+                };
+
+                void AddName( const char* name, uint32 length, bool missing = false ) noexcept
+                {
+                    Add( Segment { name, length, 0, missing } );
+                }
+
+                void AddName( const char* name, bool missing = false ) noexcept
+                {
+                    uint32 length = 0;
+
+                    while ( name[ length ] != 0 )
+                    {
+                        length++;
+                    }
+
+                    AddName( name, length, missing );
+                }
+
+                void AddIndex( uint32 index ) noexcept
+                {
+                    Add( Segment { nullptr, 0, index, false } );
+                }
+
+                int32 GetSegmentCount() const noexcept
+                {
+                    return segments.GetArrayElementCount();
+                }
+
+                const Segment& GetSegment( int32 index ) const noexcept
+                {
+                    return segments[ index ];
+                }
+
+            private:
+                Array<Segment> segments;
+
+                void Add( const Segment& segment ) noexcept
+                {
+                    MayThrow(
+                        [ & ]()
+                        {
+                            segments.AppendArrayElement( segment );
+                            return Status::kOk;
+                        } );
+                }
+            };
+
+            namespace Detail
+            {
+                inline bool HoldsZero( const StringView& string ) noexcept
+                {
+                    for ( char c : string )
+                    {
+                        if ( c == 0 )
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+            } // namespace Detail
+
+            inline Status ValidateTraced( const Value& value, const double&, ReadPath& ) noexcept
+            {
+                return value.AsNumber() ? Status::kOk : Status::kInvalidValueType;
+            }
+
+            inline Status DeserializeTraced( const Value& value, double& data, ReadPath& ) noexcept
+            {
+                const double* number = value.AsNumber();
+
+                if ( !number )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                data = *number;
+
+                return Status::kOk;
+            }
+
+            inline Status ValidateTraced( const Value& value, const bool&, ReadPath& ) noexcept
+            {
+                return value.AsBool() ? Status::kOk : Status::kInvalidValueType;
+            }
+
+            inline Status DeserializeTraced( const Value& value, bool& data, ReadPath& ) noexcept
+            {
+                const bool* boolean = value.AsBool();
+
+                if ( !boolean )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                data = *boolean;
+
+                return Status::kOk;
+            }
+
+            inline Status ValidateTraced( const Value& value, const Null&, ReadPath& ) noexcept
+            {
+                return value.IsNull() ? Status::kOk : Status::kInvalidValueType;
+            }
+
+            inline Status DeserializeTraced( const Value& value, Null&, ReadPath& ) noexcept
+            {
+                return value.IsNull() ? Status::kOk : Status::kInvalidValueType;
+            }
+
+            // A String<> ends at its first zero, so a string that holds one fails with kStringHoldsZero.
+            TERATHON_API Status ValidateTraced( const Value& value, const String<>& data, ReadPath& path ) noexcept;
+            TERATHON_API Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const Array<T>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, Array<T>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const ObjectMap<T>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, ObjectMap<T>& data, ReadPath& path ) noexcept;
+
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+
+            TERATHON_API Status ValidateTraced( const Value& value, const std::string& data, ReadPath& path ) noexcept;
+            TERATHON_API Status DeserializeTraced( const Value& value, std::string& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const std::vector<T>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, std::vector<T>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const std::map<std::string, T>& data, ReadPath& path ) noexcept;
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, std::map<std::string, T>& data, ReadPath& path ) noexcept;
+
+#endif
+
+            namespace Detail
+            {
+                using Json::Detail::DeclVal;
+                using Json::Detail::IsDetectedExact;
+
+                template <class T>
+                using TracedValidateMember = decltype( DeclVal<const T&>().ValidateTraced( DeclVal<const Value&>(), DeclVal<ReadPath&>() ) );
+
+                template <class T>
+                using PlainValidateMember = decltype( DeclVal<const T&>().Validate( DeclVal<const Value&>() ) );
+
+                template <class T>
+                using TracedValidate = decltype( ValidateTraced( DeclVal<const Value&>(), DeclVal<const T&>(), DeclVal<ReadPath&>() ) );
+
+                template <class T>
+                using TracedDeserializeMember = decltype( DeclVal<T&>().DeserializeTraced( DeclVal<const Value&>(), DeclVal<ReadPath&>() ) );
+
+                template <class T>
+                using PlainDeserializeMember = decltype( DeclVal<T&>().Deserialize( DeclVal<const Value&>() ) );
+
+                template <class T>
+                using TracedDeserialize = decltype( DeserializeTraced( DeclVal<const Value&>(), DeclVal<T&>(), DeclVal<ReadPath&>() ) );
+            } // namespace Detail
+
+            // Validates or deserializes through the traced function of a type when it has one, and otherwise through its
+            // own Validate or Deserialize, which adds nothing to the path.
+            template <class T>
+            Status ValidateValue( const Value& value, const T& data, ReadPath& path ) noexcept
+            {
+                if constexpr ( Detail::IsDetectedExact<Status, Detail::TracedValidateMember, T>::Value )
+                {
+                    return data.ValidateTraced( value, path );
+                }
+                else if constexpr ( Detail::IsDetectedExact<Status, Detail::PlainValidateMember, T>::Value )
+                {
+                    return MayThrow( [ & ]() { return data.Validate( value ); } );
+                }
+                else if constexpr ( Detail::IsDetectedExact<Status, Detail::TracedValidate, T>::Value )
+                {
+                    return ValidateTraced( value, data, path );
+                }
+                else
+                {
+                    return MayThrow( [ & ]() { return Validate( value, data ); } );
+                }
+            }
+
+            template <class T>
+            Status DeserializeValue( const Value& value, T& data, ReadPath& path ) noexcept
+            {
+                if constexpr ( Detail::IsDetectedExact<Status, Detail::TracedDeserializeMember, T>::Value )
+                {
+                    return data.DeserializeTraced( value, path );
+                }
+                else if constexpr ( Detail::IsDetectedExact<Status, Detail::PlainDeserializeMember, T>::Value )
+                {
+                    return MayThrow( [ & ]() { return data.Deserialize( value ); } );
+                }
+                else if constexpr ( Detail::IsDetectedExact<Status, Detail::TracedDeserialize, T>::Value )
+                {
+                    return DeserializeTraced( value, data, path );
+                }
+                else
+                {
+                    return MayThrow( [ & ]() { return Deserialize( value, data ); } );
+                }
+            }
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const Array<T>&, ReadPath& path ) noexcept
+            {
+                ArrayView array = value.AsArray();
+
+                if ( !array )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
+                    {
+                        const T element = T();
+
+                        for ( uint32 a = 0; a < array.GetElementCount(); a++ )
+                        {
+                            Status status = ValidateValue( array[ a ], element, path );
+
+                            if ( status != Status::kOk )
+                            {
+                                path.AddIndex( a );
+                                return status;
+                            }
+                        }
+
+                        return Status::kOk;
+                    } );
+            }
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, Array<T>& data, ReadPath& path ) noexcept
+            {
+                ArrayView array = value.AsArray();
+
+                if ( !array )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                Status status = MayThrow(
+                    [ & ]()
+                    {
+                        data.PurgeArray();
+                        data.ReserveArrayElementCount( int32( array.GetElementCount() ) );
+
+                        for ( uint32 a = 0; a < array.GetElementCount(); a++ )
+                        {
+                            T      element;
+                            Status elementStatus = DeserializeValue( array[ a ], element, path );
+
+                            if ( elementStatus != Status::kOk )
+                            {
+                                path.AddIndex( a );
+                                return elementStatus;
+                            }
+
+                            data.AppendArrayElement( static_cast<T&&>( element ) );
+                        }
+
+                        return Status::kOk;
+                    } );
+
+                if ( status != Status::kOk )
+                {
+                    data.PurgeArray();
+                }
+
+                return status;
+            }
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const ObjectMap<T>&, ReadPath& path ) noexcept
+            {
+                ObjectView object = value.AsObject();
+
+                if ( !object )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
+                    {
+                        const T element = T();
+
+                        for ( const Member& member : object )
+                        {
+                            Status status =
+                                Detail::HoldsZero( member.GetName() ) ? Status::kStringHoldsZero : ValidateValue( member.GetValue(), element, path );
+
+                            if ( status != Status::kOk )
+                            {
+                                path.AddName( member.GetName().GetText(), member.GetName().GetLength() );
+                                return status;
+                            }
+                        }
+
+                        return Status::kOk;
+                    } );
+            }
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, ObjectMap<T>& data, ReadPath& path ) noexcept
+            {
+                using ElementType = typename ObjectMap<T>::ElementType;
+
+                ObjectView object = value.AsObject();
+
+                if ( !object )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                Status status = MayThrow(
+                    [ & ]()
+                    {
+                        data.PurgeMap();
+
+                        for ( const Member& member : object )
+                        {
+                            const StringView& name          = member.GetName();
+                            ElementType*      element       = nullptr;
+                            Status            elementStatus = Detail::HoldsZero( name ) ? Status::kStringHoldsZero : Status::kOk;
+
+                            if ( elementStatus == Status::kOk )
+                            {
+                                elementStatus = MayThrow(
+                                    [ & ]()
+                                    {
+                                        element       = new ElementType;
+                                        element->name = Terathon::String<>( name.GetText(), int32( name.GetLength() ) );
+
+                                        return DeserializeValue( member.GetValue(), element->data, path );
+                                    } );
+                            }
+
+                            if ( elementStatus != Status::kOk )
+                            {
+                                delete element;
+                                path.AddName( name.GetText(), name.GetLength() );
+
+                                return elementStatus;
+                            }
+
+                            data.InsertMapElement( element );
+                        }
+
+                        return Status::kOk;
+                    } );
+
+                if ( status != Status::kOk )
+                {
+                    data.PurgeMap();
+                }
+
+                return status;
+            }
+
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const std::vector<T>&, ReadPath& path ) noexcept
+            {
+                return ValidateTraced( value, Terathon::Array<T>(), path );
+            }
+
+            template <class T>
+            Status DeserializeTraced( const Value& value, std::vector<T>& data, ReadPath& path ) noexcept
+            {
+                ArrayView array = value.AsArray();
+
+                if ( !array )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                Status status = MayThrow(
+                    [ & ]()
+                    {
+                        data.clear();
+                        data.reserve( array.GetElementCount() );
+
+                        for ( uint32 a = 0; a < array.GetElementCount(); a++ )
+                        {
+                            T      element;
+                            Status elementStatus = DeserializeValue( array[ a ], element, path );
+
+                            if ( elementStatus != Status::kOk )
+                            {
+                                path.AddIndex( a );
+                                return elementStatus;
+                            }
+
+                            data.push_back( static_cast<T&&>( element ) );
+                        }
+
+                        return Status::kOk;
+                    } );
+
+                if ( status != Status::kOk )
+                {
+                    data.clear();
+                }
+
+                return status;
+            }
+
+            template <class T>
+            Status ValidateTraced( const Value& value, const std::map<std::string, T>&, ReadPath& path ) noexcept
+            {
+                ObjectView object = value.AsObject();
+
+                if ( !object )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
+                    {
+                        const T element = T();
+
+                        for ( const Member& member : object )
+                        {
+                            Status status = ValidateValue( member.GetValue(), element, path );
+
+                            if ( status != Status::kOk )
+                            {
+                                path.AddName( member.GetName().GetText(), member.GetName().GetLength() );
+                                return status;
+                            }
+                        }
+
+                        return Status::kOk;
+                    } );
+            }
+
+            // A std::map is left as it was when a value fails.
+            template <class T>
+            Status DeserializeTraced( const Value& value, std::map<std::string, T>& data, ReadPath& path ) noexcept
+            {
+                ObjectView object = value.AsObject();
+
+                if ( !object )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                return MayThrow(
+                    [ & ]()
+                    {
+                        std::map<std::string, T> result;
+
+                        for ( const Member& member : object )
+                        {
+                            const StringView& name   = member.GetName();
+                            Status            status = DeserializeValue( member.GetValue(), result[ std::string( name.GetText(), name.GetLength() ) ], path );
+
+                            if ( status != Status::kOk )
+                            {
+                                path.AddName( name.GetText(), name.GetLength() );
+                                return status;
+                            }
+                        }
+
+                        data.swap( result );
+
+                        return Status::kOk;
+                    } );
+            }
+
+#endif
+
+            // A member that the object does not have fails with kNameNotPresent, unless it is optional.
+            template <class T>
+            Status ValidateMember( const Value& value, const char* name, const T& data, bool optional, ReadPath& path ) noexcept
+            {
+                ObjectView object = value.AsObject();
+
+                if ( !object )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                const Value* member = object.Find( name );
+
+                if ( !member )
+                {
+                    if ( optional )
+                    {
+                        return Status::kOk;
+                    }
+
+                    path.AddName( name, true );
+                    return Status::kNameNotPresent;
+                }
+
+                Status status = ValidateValue( *member, data, path );
+
+                if ( status != Status::kOk )
+                {
+                    path.AddName( name );
+                }
+
+                return status;
+            }
+
+            template <class T>
+            Status DeserializeMember( const Value& value, const char* name, T& data, bool optional, ReadPath& path ) noexcept
+            {
+                ObjectView object = value.AsObject();
+
+                if ( !object )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                const Value* member = object.Find( name );
+
+                if ( !member )
+                {
+                    if ( optional )
+                    {
+                        return Status::kOk;
+                    }
+
+                    path.AddName( name, true );
+                    return Status::kNameNotPresent;
+                }
+
+                Status status = DeserializeValue( *member, data, path );
+
+                if ( status != Status::kOk )
+                {
+                    path.AddName( name );
+                }
+
+                return status;
+            }
+
+            inline Status ValidateProto( const Value&, ReadPath& ) noexcept
+            {
+                return Status::kOk;
+            }
+
+            template <class T, class... Args>
+            Status ValidateProto( const Value& value, ReadPath& path, const T& data, Args&&... args ) noexcept
+            {
+                Status status = ValidateValue( value, data, path );
+
+                return ( status == Status::kOk ) ? ValidateProto( value, path, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            template <class T, class... Args>
+            Status ValidateProto( const Value& value, ReadPath& path, const char* name, const T& data, Args&&... args ) noexcept
+            {
+                Status status = ValidateMember( value, name, data, false, path );
+
+                return ( status == Status::kOk ) ? ValidateProto( value, path, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            template <class T, class... Args>
+            Status ValidateProto( const Value& value, ReadPath& path, Json::Detail::Optional, const char* name, const T& data, Args&&... args ) noexcept
+            {
+                Status status = ValidateMember( value, name, data, true, path );
+
+                return ( status == Status::kOk ) ? ValidateProto( value, path, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            inline Status DeserializeProto( const Value&, ReadPath& ) noexcept
+            {
+                return Status::kOk;
+            }
+
+            template <class T, class... Args>
+            Status DeserializeProto( const Value& value, ReadPath& path, T& data, Args&&... args ) noexcept
+            {
+                Status status = DeserializeValue( value, data, path );
+
+                return ( status == Status::kOk ) ? DeserializeProto( value, path, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            template <class T, class... Args>
+            Status DeserializeProto( const Value& value, ReadPath& path, const char* name, T& data, Args&&... args ) noexcept
+            {
+                Status status = DeserializeMember( value, name, data, false, path );
+
+                return ( status == Status::kOk ) ? DeserializeProto( value, path, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            template <class T, class... Args>
+            Status DeserializeProto( const Value& value, ReadPath& path, Json::Detail::Optional, const char* name, T& data, Args&&... args ) noexcept
+            {
+                Status status = DeserializeMember( value, name, data, true, path );
+
+                return ( status == Status::kOk ) ? DeserializeProto( value, path, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            // For the types that have a traced function, and for custom Validate and Deserialize functions to call.
+            template <class T, class = Detail::TracedValidate<T>>
+            Status Validate( const Value& value, const T& data ) noexcept
+            {
+                ReadPath path;
+                return ValidateValue( value, data, path );
+            }
+
+            template <class T, class = Detail::TracedDeserialize<T>>
+            Status Deserialize( const Value& value, T& data ) noexcept
+            {
+                ReadPath path;
+                return DeserializeValue( value, data, path );
+            }
+
+            template <class T>
+            Status Validate( const Value& value, const char* name, const T& data ) noexcept
+            {
+                ReadPath path;
+                return ValidateMember( value, name, data, false, path );
+            }
+
+            template <class T>
+            Status Deserialize( const Value& value, const char* name, T& data ) noexcept
+            {
+                ReadPath path;
+                return DeserializeMember( value, name, data, false, path );
+            }
+
+            template <class T>
+            Status Validate( const StructuredData& document, const T& data ) noexcept
+            {
+                if ( !document.GetRoot() )
+                {
+                    return Status::kInvalidStructuredData;
+                }
+
+                ReadPath path;
+                return ValidateValue( *document.GetRoot(), data, path );
+            }
+
+            template <class T>
+            Status StructuredData::DeserializeTo( T& data ) const noexcept
+            {
+                if ( !root )
+                {
+                    return Status::kInvalidStructuredData;
+                }
+
+                ReadPath path;
+                return DeserializeValue( *root, data, path );
+            }
+
+            struct ReadResult
+            {
+                Status   status      = Status::kOk;
+                int32    errorLine   = 0;
+                int32    errorColumn = 0;
+                String<> path;
+            };
+
+            // Writes the path of a failed read, such as "meshes[2].name", and finds the line and column in the text of the
+            // value at fault, or of the object that misses a member.
+            TERATHON_API void
+            LocateReadFailure( const char* text, uint64 length, const ParseOptions& options, const ReadPath& path, ReadResult& result ) noexcept;
+
+            TERATHON_API Status ReadTextFile( const char* fileName, Array<char>& text ) noexcept;
+
+            // Parses a text and deserializes it into data in one call. A failure reports the path of the value at fault and
+            // its line and column.
+            template <class T>
+            ReadResult Read( const char* text, uint64 length, T& data, const ParseOptions& options = ParseOptions() ) noexcept
+            {
+                ReadResult     result;
+                StructuredData document;
+                ParseResult    parseResult = document.ParseText( text, length, options );
+
+                if ( parseResult.status != Status::kOk )
+                {
+                    result.status      = parseResult.status;
+                    result.errorLine   = parseResult.errorLine;
+                    result.errorColumn = parseResult.errorColumn;
+
+                    return result;
+                }
+
+                ReadPath path;
+                result.status = DeserializeValue( *document.GetRoot(), data, path );
+
+                if ( result.status != Status::kOk )
+                {
+                    LocateReadFailure( text, length, options, path, result );
+                }
+
+                return result;
+            }
+
+            template <class T>
+            ReadResult Read( const char* fileName, T& data, const ParseOptions& options = ParseOptions() ) noexcept
+            {
+                Terathon::Array<char> text;
+                ReadResult            result;
+
+                result.status = ReadTextFile( fileName, text );
+
+                return ( result.status == Status::kOk ) ? Read( text.begin(), uint64( text.GetArrayElementCount() ), data, options ) : result;
+            }
         } // namespace V3
 
     } // namespace Json
@@ -2124,6 +2861,14 @@ extern template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Val
     inline C4::Json::Status Serialize( C4::Json::Value* sd, const JSON4C4TYPE& object ) noexcept                                                               \
     {                                                                                                                                                          \
         return C4::Json::SerializeProto( sd, JSON4C4PROTO );                                                                                                   \
+    }                                                                                                                                                          \
+    inline C4::Json::Status ValidateTraced( const C4::Json::V3::Value& value, const JSON4C4TYPE& object, C4::Json::V3::ReadPath& path ) noexcept               \
+    {                                                                                                                                                          \
+        return C4::Json::V3::ValidateProto( value, path, JSON4C4PROTO );                                                                                       \
+    }                                                                                                                                                          \
+    inline C4::Json::Status DeserializeTraced( const C4::Json::V3::Value& value, JSON4C4TYPE& object, C4::Json::V3::ReadPath& path ) noexcept                  \
+    {                                                                                                                                                          \
+        return C4::Json::V3::DeserializeProto( value, path, JSON4C4PROTO );                                                                                    \
     }
 
 #define DEFINE_JSON4C4_MEMBER_FUNCTIONS( JSON4C4PROTO )                                                                                                        \
@@ -2138,6 +2883,14 @@ extern template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Val
     inline C4::Json::Status Serialize( C4::Json::Value* sd ) const noexcept                                                                                    \
     {                                                                                                                                                          \
         return C4::Json::SerializeProto( sd, JSON4C4PROTO );                                                                                                   \
+    }                                                                                                                                                          \
+    inline C4::Json::Status ValidateTraced( const C4::Json::V3::Value& value, C4::Json::V3::ReadPath& path ) const noexcept                                    \
+    {                                                                                                                                                          \
+        return C4::Json::V3::ValidateProto( value, path, JSON4C4PROTO );                                                                                       \
+    }                                                                                                                                                          \
+    inline C4::Json::Status DeserializeTraced( const C4::Json::V3::Value& value, C4::Json::V3::ReadPath& path ) noexcept                                       \
+    {                                                                                                                                                          \
+        return C4::Json::V3::DeserializeProto( value, path, JSON4C4PROTO );                                                                                    \
     }
 
 #if defined( _MSC_VER )
