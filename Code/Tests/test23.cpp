@@ -369,6 +369,15 @@ void TestRules()
     // A number that cannot be written fails the build, where 2.x fails when the document is written.
     CheckStatus( data.SerializeFrom( std::numeric_limits<double>::quiet_NaN() ), Json::Status::kFloatInvalid, "NaN" );
     CheckStatus( data.SerializeFrom( -std::numeric_limits<double>::infinity() ), Json::Status::kFloatInvalid, "an infinity" );
+
+    const char* label = "label";
+    const char* none  = nullptr;
+
+    CheckStatus( data.SerializeFrom( "text" ), Json::Status::kOk, "a string literal as the root" );
+    Check( data.GetRoot() && ( data.GetRoot()->AsString() == "text" ), "a string literal is a string" );
+    CheckStatus( data.SerializeFrom( label ), Json::Status::kOk, "a pointer to characters as the root" );
+    Check( data.GetRoot() && ( data.GetRoot()->AsString() == "label" ), "a pointer to characters is a string" );
+    CheckStatus( data.SerializeFrom( none ), Json::Status::kInvalidValueType, "a null pointer to characters" );
 }
 
 // Refuses each block request of a build in turn, and then every request from it on. The build either gives the same

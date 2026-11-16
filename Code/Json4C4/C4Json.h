@@ -1565,6 +1565,12 @@ namespace C4
             return node.SetString( data, uint32( data.GetStringLength() ) );
         }
 
+        // Without it, a pointer to characters, or a string literal, would be serialized as a bool.
+        inline Status Serialize( Node node, const char* data ) noexcept
+        {
+            return data ? node.SetString( data, Detail::GetTextLength( data ) ) : Status::kInvalidValueType;
+        }
+
         template <class T>
         Status Serialize( Node node, const Array<T>& data ) noexcept;
 
