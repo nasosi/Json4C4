@@ -88,13 +88,13 @@ For optional arguments, you can use the keyword ```Json::optional``` to designat
 ```
 
 ### Parsing text in memory
-```Parse``` also reads a text in memory from a pointer and a length. The text needs no terminating zero, and it is not copied:
+```ParseText``` reads a text in memory from a pointer and a length. The text needs no terminating zero, and it is not copied:
 ```cxx
-auto parseResult = jsonStructuredData.Parse( text, length );
+auto parseResult = jsonStructuredData.ParseText( text, length );
 ```
 
 ### Parse options
-Every ```Parse``` overload takes an optional ```Json::ParseOptions```:
+```Parse``` and ```ParseText``` take an optional ```Json::ParseOptions```:
 ```cxx
 Json::ParseOptions options;
 options.duplicateNames  = Json::DuplicateNames::kKeepLast;
@@ -104,16 +104,17 @@ auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", option
 ```
 * ```duplicateNames``` decides what happens when an object repeats a name. ```kReject``` (the default) fails with ```Status::kDuplicateName```, ```kKeepFirst``` keeps the first value and ```kKeepLast``` keeps the last one. A kept name stays where it first appeared.
 * ```maxNestingDepth``` limits how deeply arrays and objects may nest. Deeper documents fail with ```Status::kMaximumNestingDepthExceeded``` instead of exhausting the stack. The default is ```JSON4C4_MAX_NESTING_DEPTH``` (256).
-* ```maxValueCount``` limits how many values (objects, arrays, strings, numbers, ```true```, ```false``` and ```null```) a document may hold, and ```maxStringByteCount``` how many bytes its names and strings may hold together, counted after their escapes are decoded. A document past either limit fails with ```Status::kMaximumValueCountExceeded``` or ```Status::kMaximumStringByteCountExceeded``` before the value or string past the limit is allocated. Neither is limited by default.
+* ```maxValueCount``` limits how many values (objects, arrays, strings, numbers, ```true```, ```false``` and ```null```) a document may hold, and ```maxStringByteCount``` how many bytes its names and strings may hold together, counted after their escapes are decoded. A document past either limit fails with ```Status::kMaximumValueCountExceeded``` or ```Status::kMaximumStringByteCountExceeded``` before the value or string past the limit is allocated. Neither is limited by default, and a negative limit allows nothing.
 
 ### Numbers
 Numbers are read correctly rounded and written in the shortest form that reads back to the same value, with the same results in every build and locale. Values from 1e-6 up to 1e21 are written as plain decimals and others in exponent form, for example ```1e+21``` and ```1e-7```.
 
 ### Version 2.3
-* ```Parse``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.
+* ```ParseText``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.
 * ```ParseOptions::maxValueCount``` and ```ParseOptions::maxStringByteCount``` limit how many values and string bytes a document may hold, with the new statuses ```kMaximumValueCountExceeded``` and ```kMaximumStringByteCountExceeded```.
-* Objects with more than 16 members find names through a sorted index instead of a hash, so no choice of names can make parsing or finding a member slow. In such an object a repeated name is found once the whole object has been read, so a syntax error later in the same object is reported instead of ```kDuplicateName```.
+* Objects with more than 16 members find names through a sorted index instead of a hash, so no choice of names can make parsing or finding a member slow. In such an object a repeated name is found once the whole object has been read, so any error later in the same object, one inside a nested value included, is reported instead of ```kDuplicateName```.
 * MSVC builds without exceptions contain no ```try``` or ```catch```.
+* ```ParseOptions``` is larger, so code built against the 2.2 header must be rebuilt to use a 2.3 shared library.
 
 ### Version 2.2.1
 * Numbers are converted with the NumberTextThree header, which replaces NumberText. Inside the C4 Engine, copy ```NumberTextThree.h``` from ```Code/NumberTextThree``` instead of ```NumberText.h```. Numbers are read faster, and read and write exactly as before.
@@ -207,7 +208,7 @@ The default for ```ParseOptions::maxNestingDepth```, 256 unless defined otherwis
 The defaults for ```ParseOptions::maxValueCount``` and ```ParseOptions::maxStringByteCount```, no limit (0x7FFFFFFFFFFFFFFF) unless defined otherwise.
 
 ### ```JSON4C4_MAX_FILE_SIZE```
-The largest file or text ```Parse``` reads and ```Write``` produces, 0x7FFFFFFE bytes unless defined otherwise. A longer text fails with ```Status::kFileTooLarge```.
+The largest file or text ```Parse``` and ```ParseText``` read and ```Write``` produces, 0x7FFFFFFE bytes unless defined lower. A longer text fails with ```Status::kFileTooLarge```.
 
 ## Third party licenses
 Third-party licenses are located in the ```Licenses``` subfolder.

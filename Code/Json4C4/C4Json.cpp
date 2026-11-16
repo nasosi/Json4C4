@@ -101,6 +101,8 @@
 
 #endif
 
+static_assert( JSON4C4_MAX_FILE_SIZE <= 0x7FFFFFFE, "JSON4C4_MAX_FILE_SIZE must leave room for the 32-bit lengths and columns of a text" );
+
 namespace C4
 {
 
@@ -1314,7 +1316,7 @@ namespace C4
             template <class T>
             Status ParseNew( Value*& value, const char*& text, int32 depth ) noexcept
             {
-                if ( valuesLeft == 0 )
+                if ( valuesLeft <= 0 )
                 {
                     return Status::kMaximumValueCountExceeded;
                 }
@@ -2192,10 +2194,10 @@ namespace C4
                 return ParseResult { Status::kUnterminatedTextBuffer, 0, 0 };
             }
 
-            return Parse( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
+            return ParseText( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
         }
 
-        ParseResult StructuredData::Parse( const char* text, uint64 length, const ParseOptions& options ) noexcept
+        ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
         {
             delete rootJsonValue;
             rootJsonValue = nullptr;

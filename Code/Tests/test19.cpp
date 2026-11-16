@@ -39,7 +39,7 @@ void TestManyNames()
     auto start = std::chrono::steady_clock::now();
 
     Json::StructuredData sd;
-    CheckStatus( sd.Parse( text.begin(), Terathon::uint64( text.GetArrayElementCount() ) ).status, Json::Status::kOk, "parse an object of many names" );
+    CheckStatus( sd.ParseText( text.begin(), Terathon::uint64( text.GetArrayElementCount() ) ).status, Json::Status::kOk, "parse an object of many names" );
 
     const Json::ObjectValue* root  = Root( sd );
     bool                     found = root && ( root->GetMapElementCount() == count );
@@ -67,7 +67,7 @@ void TestManyNames()
         text.AppendArrayElement( *c );
     }
 
-    Json::ParseResult result = sd.Parse( text.begin(), Terathon::uint64( text.GetArrayElementCount() ) );
+    Json::ParseResult result = sd.ParseText( text.begin(), Terathon::uint64( text.GetArrayElementCount() ) );
     CheckStatus( result.status, Json::Status::kDuplicateName, "a repeat at the end of many names" );
     Check( ( result.errorLine == 1 ) && ( result.errorColumn == repeatColumn ), "the repeat at the end is reported where it is" );
 }
@@ -160,6 +160,90 @@ void TestRepeatedNames()
     Check( result.errorColumn == early.nameColumn[ 10 ], "a repeat among the first members is reported first" );
 }
 
+// Appends a member to an object being written and returns the column of its name.
+int AppendMember( Terathon::String<>& text, const char* name, const char* value )
+{
+    if ( text.GetStringLength() > 1 )
+    {
+        text += ",";
+    }
+
+    int column = text.GetStringLength() + 1;
+
+    text += "\"";
+    text += name;
+    text += "\":";
+    text += value;
+
+    return column;
+}
+
+// Members named prefix0 to prefix(count - 1) with their positions as values, then a repeat of repeatedName if given.
+Terathon::String<> MakeMembers( const char* prefix, int count, const char* repeatedName, int* repeatColumn, int columnBase )
+{
+    Terathon::String<> text = "{";
+    char               name[ 16 ];
+    char               value[ 16 ];
+
+    for ( int a = 0; a < count; a++ )
+    {
+        snprintf( name, sizeof( name ), "%s%d", prefix, a );
+        snprintf( value, sizeof( value ), "%d", a );
+        AppendMember( text, name, value );
+    }
+
+    if ( repeatedName )
+    {
+        snprintf( value, sizeof( value ), "%d", count );
+        *repeatColumn = columnBase + AppendMember( text, repeatedName, value ) - 1;
+    }
+
+    return text;
+}
+
+// Large objects inside large objects, each settling its own repeated names when it closes.
+void TestNestedLargeObjects()
+{
+    Json::StructuredData sd;
+    int                  repeatColumn = 0;
+
+    // The outer object repeats o0 after a large inner object.
+    Terathon::String<> outer = MakeMembers( "o", 17, nullptr, nullptr, 0 );
+    Terathon::String<> inner = MakeMembers( "i", 30, nullptr, nullptr, 0 ) + "}";
+    AppendMember( outer, "o17", inner );
+    AppendMember( outer, "o18", "18" );
+    repeatColumn = AppendMember( outer, "o0", "19" );
+    outer += "}";
+
+    Json::ParseResult result = ParseText( sd, outer );
+    CheckStatus( result.status, Json::Status::kDuplicateName, "a repeat after a large inner object" );
+    Check( result.errorColumn == repeatColumn, "a repeat after a large inner object is reported where it is" );
+
+    // The outer object repeats o1 before an inner object that repeats i3, and the inner object closes first.
+    outer = MakeMembers( "o", 17, nullptr, nullptr, 0 );
+    AppendMember( outer, "o1", "17" );
+    int innerColumn = AppendMember( outer, "o18", "" ) + 6;
+    outer += MakeMembers( "i", 20, "i3", &repeatColumn, innerColumn );
+    outer += "}}";
+
+    result = ParseText( sd, outer );
+    CheckStatus( result.status, Json::Status::kDuplicateName, "repeats in an outer and an inner large object" );
+    Check( result.errorColumn == repeatColumn, "the repeat of the inner object, which closes first, is reported" );
+
+    Json::ParseOptions options;
+    options.duplicateNames = Json::DuplicateNames::kKeepLast;
+    CheckStatus( ParseText( sd, outer, options ).status, Json::Status::kOk, "keep the last of repeats in nested large objects" );
+
+    const Json::ObjectValue* root        = Root( sd );
+    const Json::ObjectValue* innerObject = root ? root->FindJsonObjectValue( "o18" ) : nullptr;
+
+    Check( root && ( root->GetMapElementCount() == 18 ) && root->FindNumber( "o1" ) && ( *root->FindNumber( "o1" ) == 17 ),
+           "the outer object keeps the last value of its repeat" );
+    Check( innerObject && ( innerObject->GetMapElementCount() == 20 ) && innerObject->FindNumber( "i3" ) && ( *innerObject->FindNumber( "i3" ) == 20 ) &&
+               innerObject->FindNumber( "i19" ),
+           "the inner object keeps the last value of its repeat" );
+}
+
 void TestBuiltByHand()
 {
     const int count = 100;
@@ -228,6 +312,7 @@ int main()
 {
     TestManyNames();
     TestRepeatedNames();
+    TestNestedLargeObjects();
     TestBuiltByHand();
 
     return TestResult();

@@ -39,8 +39,8 @@ void CheckBounded( const char* text, size_t length, const char* description )
     Json::StructuredData bounded;
     Json::StructuredData followed;
     Json::StructuredData terminated;
-    Json::ParseResult    boundedResult    = bounded.Parse( exact, length );
-    Json::ParseResult    followedResult   = followed.Parse( text, length );
+    Json::ParseResult    boundedResult    = bounded.ParseText( exact, length );
+    Json::ParseResult    followedResult   = followed.ParseText( text, length );
     Json::ParseResult    terminatedResult = ParseText( terminated, text, length );
 
     bool same = SameResult( bounded, boundedResult, followed, followedResult ) && SameResult( bounded, boundedResult, terminated, terminatedResult );
@@ -183,7 +183,7 @@ void TestLongTails()
         memcpy( exact, c.text, length );
 
         Json::StructuredData sd;
-        CheckStatus( sd.Parse( exact, length ).status, c.status, "a text with a long tail" );
+        CheckStatus( sd.ParseText( exact, length ).status, c.status, "a text with a long tail" );
         CheckBounded( c.text, length, "a text with a long tail" );
 
         free( exact );
@@ -194,18 +194,33 @@ void TestEdges()
 {
     Json::StructuredData sd;
 
-    CheckStatus( sd.Parse( "[1]", 3 ).status, Json::Status::kOk, "a text without a terminating zero" );
-    CheckStatus( sd.Parse( nullptr, 5 ).status, Json::Status::kTextBufferContentsInvalid, "no text" );
+    CheckStatus( sd.ParseText( "[1]", 3 ).status, Json::Status::kOk, "a text without a terminating zero" );
+    CheckStatus( sd.ParseText( nullptr, 5 ).status, Json::Status::kTextBufferContentsInvalid, "no text" );
     Check( sd.GetRootJsonValue() == nullptr, "a failed parse clears the previous document" );
-    CheckStatus( sd.Parse( "[1]", 0 ).status, Json::Status::kTextBufferContentsInvalid, "an empty text" );
-    CheckStatus( sd.Parse( "[1]", Terathon::uint64( 0x80000000U ) ).status, Json::Status::kFileTooLarge, "a text longer than the limit" );
+    CheckStatus( sd.ParseText( "[1]", 0 ).status, Json::Status::kTextBufferContentsInvalid, "an empty text" );
+    CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x7FFFFFFFU ) ).status, Json::Status::kFileTooLarge, "a text one byte longer than the limit" );
+    CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x80000000U ) ).status, Json::Status::kFileTooLarge, "a text longer than the limit" );
+    CheckStatus( sd.ParseText( "[1]", ~Terathon::uint64( 0 ) ).status, Json::Status::kFileTooLarge, "the longest length" );
 
-    Json::ParseResult result = sd.Parse( "[\"a\0b\"]", 7 );
+    Json::ParseResult result = sd.ParseText( "[\"a\0b\"]", 7 );
     CheckStatus( result.status, Json::Status::kStringIllegalChar, "a zero inside a string" );
     Check( ( result.errorLine == 1 ) && ( result.errorColumn == 4 ), "a zero inside a string is found where it is" );
 
-    CheckStatus( sd.Parse( "[1]\0", 4 ).status, Json::Status::kExpectedEndOfFile, "a zero after the value" );
-    CheckStatus( sd.Parse( "\"ab", 3 ).status, Json::Status::kPrematureNullTerminator, "a string cut by the end" );
+    CheckStatus( sd.ParseText( "[1]\0", 4 ).status, Json::Status::kExpectedEndOfFile, "a zero after the value" );
+    CheckStatus( sd.ParseText( "\"ab", 3 ).status, Json::Status::kPrematureNullTerminator, "a string cut by the end" );
+}
+
+// Calls written for 2.2 keep their meaning next to ParseText.
+void TestParseOverloads()
+{
+    Json::StructuredData  sd;
+    Terathon::Array<char> buffer = MakeTextBuffer( "[1]", 3 );
+
+    CheckStatus( sd.Parse( "Data/Examples/simple.json", {} ).status, Json::Status::kOk, "a file with braced options" );
+    Check( sd.GetRootJsonValue() && sd.GetRootJsonValue()->AsJsonObjectValue(), "a file with braced options is read" );
+    CheckStatus( sd.Parse( buffer, {} ).status, Json::Status::kOk, "a buffer with braced options" );
+    CheckStatus( sd.Parse( "Data/Examples/simple.json" ).status, Json::Status::kOk, "a file without options" );
+    CheckStatus( sd.Parse( buffer ).status, Json::Status::kOk, "a buffer without options" );
 }
 
 void TestLimits()
@@ -237,6 +252,15 @@ void TestLimits()
 
     options.maxStringByteCount = 4;
     CheckStatus( ParseText( sd, strings, options ).status, Json::Status::kMaximumStringByteCountExceeded, "names count as string bytes" );
+
+    options               = Json::ParseOptions();
+    options.maxValueCount = -1;
+    CheckStatus( ParseText( sd, "1", options ).status, Json::Status::kMaximumValueCountExceeded, "a negative value limit allows no value" );
+
+    options                    = Json::ParseOptions();
+    options.maxStringByteCount = -1;
+    CheckStatus( ParseText( sd, "[\"\"]", options ).status, Json::Status::kMaximumStringByteCountExceeded, "a negative string limit allows no string" );
+    CheckStatus( ParseText( sd, "[1]", options ).status, Json::Status::kOk, "a negative string limit allows a document without strings" );
 }
 
 int main()
@@ -245,6 +269,7 @@ int main()
     TestTokensAtTheEnd();
     TestLongTails();
     TestEdges();
+    TestParseOverloads();
     TestLimits();
 
     return TestResult();

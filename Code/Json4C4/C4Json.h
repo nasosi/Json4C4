@@ -677,7 +677,7 @@ namespace C4
 
             TERATHON_API ParseResult Parse( const char* fileName, const ParseOptions& options = ParseOptions() ) noexcept;
             TERATHON_API ParseResult Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options = ParseOptions() ) noexcept;
-            TERATHON_API ParseResult Parse( const char* text, uint64 length, const ParseOptions& options = ParseOptions() ) noexcept;
+            TERATHON_API ParseResult ParseText( const char* text, uint64 length, const ParseOptions& options = ParseOptions() ) noexcept;
 
             TERATHON_API Status Write( const char* fileName, const uint32 indentationLength = 2, const char indentationChar = ' ' ) noexcept;
 
