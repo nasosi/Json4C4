@@ -169,7 +169,7 @@ void TestEdits()
     for ( int a = 0; a < 20; a++ )
     {
         char name[ 16 ];
-        char member[ 32 ];
+        char member[ 64 ];
 
         snprintf( name, sizeof( name ), "k%d", a );
         snprintf( member, sizeof( member ), ", \"%s\": %g", name, a / 4.0 );
