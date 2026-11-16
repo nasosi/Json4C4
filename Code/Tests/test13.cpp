@@ -6,6 +6,8 @@
 #    include <string>
 #    include <vector>
 
+namespace V3 = Json::V3;
+
 struct Item
 {
     double v = 0;
@@ -49,14 +51,14 @@ struct MoveOnly
 
 void TestVectorOfMemberStructs()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "[{\"v\":1},{\"v\":2}]" ).status, Json::Status::kOk, "parse an array of objects" );
 
     std::vector<Item> items;
     CheckStatus( sd.DeserializeTo( items ), Json::Status::kOk, "deserialize a vector of member structs" );
     Check( items.size() == 2 && items[ 0 ].v == 1 && items[ 1 ].v == 2, "vector of member structs values" );
 
-    CheckStatus( Json::Validate( sd, items ), Json::Status::kOk, "validate a vector of member structs" );
+    CheckStatus( V3::Validate( sd, items ), Json::Status::kOk, "validate a vector of member structs" );
 
     Terathon::Array<Item> itemArray;
     CheckStatus( sd.DeserializeTo( itemArray ), Json::Status::kOk, "deserialize an array of member structs" );
@@ -65,21 +67,21 @@ void TestVectorOfMemberStructs()
 
 void TestAggregateWithArray()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "[{\"a\":[1,2]},{\"a\":[]}]" ).status, Json::Status::kOk, "parse aggregates" );
 
     Terathon::Array<Aggregate> aggregates;
-    CheckStatus( Json::Validate( sd, aggregates ), Json::Status::kOk, "validate an array of aggregates with an array member" );
+    CheckStatus( V3::Validate( sd, aggregates ), Json::Status::kOk, "validate an array of aggregates with an array member" );
     CheckStatus( sd.DeserializeTo( aggregates ), Json::Status::kOk, "deserialize an array of aggregates with an array member" );
     Check( aggregates.GetArrayElementCount() == 2 && aggregates[ 0 ].a.GetArrayElementCount() == 2, "aggregate values" );
 
     std::vector<Aggregate> aggregateVector;
-    CheckStatus( Json::Validate( sd, aggregateVector ), Json::Status::kOk, "validate a vector of aggregates with an array member" );
+    CheckStatus( V3::Validate( sd, aggregateVector ), Json::Status::kOk, "validate a vector of aggregates with an array member" );
 }
 
 void TestMoveOnlyElements()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus(
         ParseText( sd, "[{\"s\":\"a\"},{\"s\":\"a string that is longer than the local buffer\"}]" ).status, Json::Status::kOk, "parse move only elements" );
 
@@ -90,11 +92,11 @@ void TestMoveOnlyElements()
 
 void TestNestedMemberStruct()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"inner\":{\"v\":3},\"w\":4}" ).status, Json::Status::kOk, "parse a nested object" );
 
     Outer outer;
-    CheckStatus( Json::Validate( sd, outer ), Json::Status::kOk, "validate a member struct inside a member struct" );
+    CheckStatus( V3::Validate( sd, outer ), Json::Status::kOk, "validate a member struct inside a member struct" );
     CheckStatus( sd.DeserializeTo( outer ), Json::Status::kOk, "deserialize a member struct inside a member struct" );
     Check( outer.inner.v == 3 && outer.w == 4, "nested member struct values" );
 
@@ -106,12 +108,12 @@ void TestNestedMemberStruct()
     Check( roundTrip.inner.v == 5 && roundTrip.w == 4, "nested member struct survives the round trip" );
 
     CheckStatus( ParseText( sd, "{\"inner\":{\"v\":\"text\"},\"w\":4}" ).status, Json::Status::kOk, "parse a nested object with a wrong type" );
-    CheckStatus( Json::Validate( sd, outer ), Json::Status::kInvalidValueType, "validate reports a wrong nested type" );
+    CheckStatus( V3::Validate( sd, outer ), Json::Status::kInvalidValueType, "validate reports a wrong nested type" );
 }
 
 void TestDeserializeReplacesMaps()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"b\":2}" ).status, Json::Status::kOk, "parse a map" );
 
     Json::ObjectMap<double> map;
@@ -135,7 +137,7 @@ void TestDeserializeReplacesMaps()
 
 void TestNestedObjectMaps()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"a\":{\"x\":1,\"y\":2},\"b\":{}}" ).status, Json::Status::kOk, "parse nested objects" );
 
     Json::ObjectMap<Json::ObjectMap<double>> maps;
@@ -145,7 +147,7 @@ void TestNestedObjectMaps()
            "nested ObjectMap values" );
 
     CheckStatus( sd.SerializeFrom( maps ), Json::Status::kOk, "serialize an ObjectMap of ObjectMaps" );
-    CheckStatus( Json::Validate( sd, maps ), Json::Status::kOk, "validate an ObjectMap of ObjectMaps" );
+    CheckStatus( V3::Validate( sd, maps ), Json::Status::kOk, "validate an ObjectMap of ObjectMaps" );
 }
 
 int main()

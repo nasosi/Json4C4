@@ -32,6 +32,7 @@
 #include <string>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 06: Parsing, deserializing, serializing and writing to a file using std::string and std::vector.
@@ -58,8 +59,8 @@ int main()
     printf( "Example06: Deserializng to std::string and std::vector.\n" );
 
     // 2. Parse the file and check parsing status
-    Json::StructuredData jsonStructuredData;
-    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/simple_with_array.json" );
+    V3::StructuredData jsonStructuredData;
+    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/simple_with_array.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {

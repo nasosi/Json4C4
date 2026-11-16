@@ -1,14 +1,17 @@
 #include "TestAllocation.h"
 #include "TestCheck.h"
 
-#if defined( JSON4C4_TEST_ALLOCATION_HOOK ) && defined( JSON4C4_TEST_EXCEPTIONS )
+#include <cstdint>
+#include <cstdlib>
+
+namespace V3 = Json::V3;
 
 struct Named
 {
     Terathon::String<> s;
 };
 
-#    define NAMED_PROTO "s", object.s
+#define NAMED_PROTO "s", object.s
 DEFINE_JSON4C4_FUNCTIONS( Named, NAMED_PROTO )
 
 struct Point
@@ -17,20 +20,59 @@ struct Point
     double y = 0;
 };
 
-#    define POINT_PROTO "x", object.x, "y", object.y
+#define POINT_PROTO "x", object.x, "y", object.y
 DEFINE_JSON4C4_FUNCTIONS( Point, POINT_PROTO )
+
+// Hands out blocks with malloc, refuses the requests from refusedFirst to refusedLast, and counts the blocks not handed
+// back.
+class CountingSource final : public V3::BlockSource
+{
+public:
+    int64_t requestCount     = 0;
+    int64_t refusedFirst     = -1;
+    int64_t refusedLast      = -1;
+    int     outstandingCount = 0;
+
+    void* AllocateBlock( Terathon::uint64 size ) noexcept override
+    {
+        int64_t request = requestCount++;
+
+        if ( ( request >= refusedFirst ) && ( request <= refusedLast ) )
+        {
+            return nullptr;
+        }
+
+        outstandingCount++;
+
+        return malloc( size_t( size ) );
+    }
+
+    void FreeBlock( void* block, Terathon::uint64 ) noexcept override
+    {
+        outstandingCount--;
+        free( block );
+    }
+};
+
+void RefuseBlocks( CountingSource& source, int64_t first, int64_t last )
+{
+    source.requestCount = 0;
+    source.refusedFirst = first;
+    source.refusedLast  = last;
+}
+
+void StopRefusing( CountingSource& source )
+{
+    source.refusedFirst = -1;
+    source.refusedLast  = -1;
+}
+
+#if defined( JSON4C4_TEST_ALLOCATION_HOOK ) && defined( JSON4C4_TEST_EXCEPTIONS )
 
 void FailAllocationsAbove( size_t size )
 {
     allocationFailAboveSize  = size;
     allocationFailCountdown  = -1;
-    allocationFailureEnabled = true;
-}
-
-void FailAllocationNumber( long number )
-{
-    allocationFailAboveSize  = 0;
-    allocationFailCountdown  = number;
     allocationFailureEnabled = true;
 }
 
@@ -55,7 +97,7 @@ void TestStringAssignment()
 
     text += "\"}";
 
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, text ).status, Json::Status::kOk, "parse a long string" );
 
     FailAllocationsAbove( 150 );
@@ -83,7 +125,7 @@ void TestArrayReservation()
 
     text += "2]";
 
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, text ).status, Json::Status::kOk, "parse a long array" );
 
     FailAllocationsAbove( 400 );
@@ -100,9 +142,12 @@ void TestArrayReservation()
     Check( numbers.GetArrayElementCount() == 101, "the array deserializes after a failed reservation" );
 }
 
+#endif
+
 void TestSerializeFromFailure()
 {
-    Json::StructuredData sd;
+    CountingSource     source;
+    V3::StructuredData sd( source );
 
     Point point;
     point.x = 1;
@@ -114,11 +159,11 @@ void TestSerializeFromFailure()
 
     long failures = 0;
 
-    for ( long number = 1; number < 20; number++ )
+    for ( int64_t refused = 0; refused < 20; refused++ )
     {
-        FailAllocationNumber( number );
+        RefuseBlocks( source, refused, INT64_MAX );
         Json::Status status = sd.SerializeFrom( point );
-        StopFailing();
+        StopRefusing( source );
 
         if ( status == Json::Status::kOk )
         {
@@ -127,34 +172,40 @@ void TestSerializeFromFailure()
 
         failures++;
 
-        CheckStatus( status, Json::Status::kException, "SerializeFrom when an allocation fails" );
-
-        Point roundTrip;
-        CheckStatus( sd.DeserializeTo( roundTrip ), Json::Status::kOk, "the old document survives a failed SerializeFrom" );
-        Check( roundTrip.x == 1 && roundTrip.y == 2, "the old document's values survive a failed SerializeFrom" );
+        CheckStatus( status, Json::Status::kAllocationRefused, "SerializeFrom when a block is refused" );
+        Check( ( sd.GetRoot() == nullptr ) && ( source.outstandingCount == 0 ), "a failed SerializeFrom leaves the document empty" );
     }
 
-    Check( failures > 0, "SerializeFrom saw allocation failures" );
+    Check( failures > 0, "SerializeFrom saw refused blocks" );
+
+    Point roundTrip;
+    CheckStatus( sd.DeserializeTo( roundTrip ), Json::Status::kOk, "SerializeFrom succeeds when no block is refused" );
+    Check( roundTrip.x == 10 && roundTrip.y == 2, "the new document's values" );
 }
 
 void TestAppendAfterFailure()
 {
-    Json::StructuredData sd;
+    CountingSource     source;
+    V3::StructuredData sd( source );
     CheckStatus( ParseText( sd, "[1,2,3,4]" ).status, Json::Status::kOk, "parse an array" );
 
-    Json::Value* root      = sd.GetRootJsonValue();
-    long         failures  = 0;
-    long         successes = 0;
+    const V3::Value& root      = *sd.GetRoot();
+    long             failures  = 0;
+    long             successes = 0;
+    bool             unchanged = true;
 
     for ( int a = 0; a < 40; a++ )
     {
-        FailAllocationNumber( 1 + a % 3 );
-        Json::Status status = Json::Serialize( root, "", double( a ) );
-        StopFailing();
+        Terathon::String<> before = WriteText( sd );
 
-        if ( status == Json::Status::kException )
+        RefuseBlocks( source, a % 3, INT64_MAX );
+        Json::Status status = sd.AppendElement( root, double( a ) );
+        StopRefusing( source );
+
+        if ( status == Json::Status::kAllocationRefused )
         {
             failures++;
+            unchanged = unchanged && ( strcmp( WriteText( sd ), before ) == 0 );
         }
         else
         {
@@ -163,59 +214,60 @@ void TestAppendAfterFailure()
         }
     }
 
-    Check( failures > 0, "appending saw allocation failures" );
-
-    const Terathon::Array<Json::Value*>* elements = root->GetDataAsPointerTo<Terathon::Array<Json::Value*>>();
-    Check( elements->GetArrayElementCount() == 4 + successes, "failed appends leave the array unchanged" );
+    Check( failures > 0, "appending saw refused blocks" );
+    Check( unchanged && ( long( root.AsArray().GetElementCount() ) == 4 + successes ), "failed appends leave the array unchanged" );
 
     CheckStatus( sd.Write( "Data/Test/out_test14_append.json" ), Json::Status::kOk, "an array that saw failed appends can be written" );
 
-    Json::StructuredData reparsed;
+    V3::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test14_append.json" ).status, Json::Status::kOk, "reparse the array" );
 }
 
+// Refuses each block request of the parse in turn, and then every request from it on.
 void TestParseFailures( const char* text, Json::Status expected = Json::Status::kOk, const Json::ParseOptions& options = Json::ParseOptions() )
 {
-    long allocationsBefore = allocationTotalCount;
+    CountingSource     source;
+    Terathon::String<> written;
 
     {
-        Json::StructuredData sd;
-        CheckStatus( ParseText( sd, text, options ).status, expected, "parse without failures" );
+        V3::StructuredData sd( source );
+        CheckStatus( ParseText( sd, text, options ).status, expected, "parse without refusals" );
+        written = WriteText( sd );
     }
 
-    long allocationsPerParse = allocationTotalCount - allocationsBefore;
-    long liveBefore          = allocationLiveCount;
-    long failures            = 0;
+    int64_t requests = source.requestCount;
+    long    failures = 0;
 
-    for ( long number = 1; number <= allocationsPerParse; number++ )
+    for ( int64_t refused = 0; refused < 2 * requests; refused++ )
     {
-        Terathon::Array<char> buffer = MakeTextBuffer( text, strlen( text ) );
-
         {
-            Json::StructuredData sd;
+            V3::StructuredData sd( source );
 
-            FailAllocationNumber( number );
-            Json::ParseResult parseResult = sd.Parse( buffer, options );
-            StopFailing();
+            RefuseBlocks( source, refused % requests, ( refused < requests ) ? refused : INT64_MAX );
+            Json::ParseResult parseResult = ParseText( sd, text, options );
+            StopRefusing( source );
 
-            Check( parseResult.status == Json::Status::kException || parseResult.status == expected, "a parse with a failing allocation reports an exception" );
-            Check( ( parseResult.status == Json::Status::kOk ) == ( sd.GetRootJsonValue() != nullptr ), "a failed parse leaves no root" );
+            Check( parseResult.status == Json::Status::kAllocationRefused || parseResult.status == expected, "a parse with a refused block reports it" );
+            Check( ( parseResult.status == Json::Status::kOk ) == ( sd.GetRoot() != nullptr ), "a failed parse leaves no root" );
+            Check( ( parseResult.status != Json::Status::kOk ) || ( strcmp( WriteText( sd ), written ) == 0 ),
+                   "a parse that asks again at a smaller size gives the same document" );
 
-            failures += ( parseResult.status == Json::Status::kException ) ? 1 : 0;
+            failures += ( parseResult.status == Json::Status::kAllocationRefused ) ? 1 : 0;
         }
 
-        buffer.PurgeArray();
-
-        Check( allocationLiveCount == liveBefore, "a parse with a failing allocation does not leak" );
+        Check( source.outstandingCount == 0, "a parse with a refused block does not leak" );
     }
 
-    Check( failures > 0, "parsing saw allocation failures" );
+    Check( failures > 0, "parsing saw refused blocks" );
 }
 
 int main()
 {
+#if defined( JSON4C4_TEST_ALLOCATION_HOOK ) && defined( JSON4C4_TEST_EXCEPTIONS )
     TestStringAssignment();
     TestArrayReservation();
+#endif
+
     TestSerializeFromFailure();
     TestAppendAfterFailure();
     TestParseFailures( "{\"a\":[1,2,3,{\"b\":\"a string that is longer than the local buffer\"}],\"c\":{\"d\":null,\"e\":true},\"f\":\"\\u00e9\"}" );
@@ -243,14 +295,3 @@ int main()
 
     return TestResult();
 }
-
-#else
-
-int main()
-{
-    fprintf( stdout, "Allocation failure checks need exceptions and a replaceable operator new; skipped\n" );
-
-    return testSkippedReturnCode;
-}
-
-#endif

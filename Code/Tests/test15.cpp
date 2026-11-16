@@ -1,5 +1,7 @@
 #include "TestCheck.h"
 
+namespace V3 = Json::V3;
+
 struct Shape
 {
     Terathon::String<> text;
@@ -27,11 +29,11 @@ void TestWriterIsStable()
 {
     for ( const char* fileName : roundTripFiles )
     {
-        Json::StructuredData sd;
+        V3::StructuredData sd;
         CheckStatus( sd.Parse( fileName ).status, Json::Status::kOk, fileName );
         CheckStatus( sd.Write( "Data/Test/out_test15_first.json" ), Json::Status::kOk, "first write" );
 
-        Json::StructuredData reparsed;
+        V3::StructuredData reparsed;
         CheckStatus( reparsed.Parse( "Data/Test/out_test15_first.json" ).status, Json::Status::kOk, "reparse the first write" );
         CheckStatus( reparsed.Write( "Data/Test/out_test15_second.json" ), Json::Status::kOk, "second write" );
 
@@ -44,7 +46,7 @@ void TestWriterIsStable()
 
 void TestInsertionOrderAndIndentation()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"z\":1,\"a\":[true,null],\"m\":{}}" ).status, Json::Status::kOk, "parse members in a non-sorted order" );
 
     Terathon::String<> text;
@@ -63,27 +65,27 @@ void TestInsertionOrderAndIndentation()
 
 void TestFindAccessors()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"s\":\"text\",\"n\":2,\"b\":false,\"z\":null,\"a\":[1],\"o\":{\"x\":1}}" ).status, Json::Status::kOk, "parse every type" );
 
-    const Json::ObjectValue* root = sd.GetRootJsonValue()->AsJsonObjectValue();
+    V3::ObjectView root = sd.GetRoot() ? sd.GetRoot()->AsObject() : V3::ObjectView();
 
-    Check( root->FindString( "s" ) && *root->FindString( "s" ) == "text", "FindString" );
-    Check( root->FindNumber( "n" ) && *root->FindNumber( "n" ) == 2, "FindNumber" );
-    Check( root->FindBool( "b" ) && *root->FindBool( "b" ) == false, "FindBool" );
-    Check( root->FindJsonNull( "z" ) != nullptr, "FindJsonNull" );
-    Check( root->FindJsonValueArray( "a" ) && root->FindJsonValueArray( "a" )->GetArrayElementCount() == 1, "FindJsonValueArray" );
-    Check( root->FindJsonObjectValue( "o" ) && root->FindJsonObjectValue( "o" )->FindNumber( "x" ), "FindJsonObjectValue" );
+    Check( root.FindString( "s" ) && ( root.FindString( "s" ) == "text" ), "FindString" );
+    Check( root.FindNumber( "n" ) && *root.FindNumber( "n" ) == 2, "FindNumber" );
+    Check( root.FindBool( "b" ) && *root.FindBool( "b" ) == false, "FindBool" );
+    Check( root.FindNull( "z" ), "FindNull" );
+    Check( root.FindArray( "a" ) && ( root.FindArray( "a" ).GetElementCount() == 1 ), "FindArray" );
+    Check( root.FindObject( "o" ) && root.FindObject( "o" ).FindNumber( "x" ), "FindObject" );
 
-    Check( !root->FindString( "n" ) && !root->FindNumber( "s" ) && !root->FindBool( "z" ) && !root->FindJsonNull( "b" ), "Find with the wrong type" );
-    Check( !root->FindJsonValueArray( "o" ) && !root->FindJsonObjectValue( "a" ), "Find containers with the wrong type" );
-    Check( !root->FindString( "missing" ) && !root->FindJsonObjectValue( "missing" ), "Find a missing name" );
+    Check( !root.FindString( "n" ) && !root.FindNumber( "s" ) && !root.FindBool( "z" ) && !root.FindNull( "b" ), "Find with the wrong type" );
+    Check( !root.FindArray( "o" ) && !root.FindObject( "a" ), "Find containers with the wrong type" );
+    Check( !root.FindString( "missing" ) && !root.FindObject( "missing" ), "Find a missing name" );
 
     int count = 0;
 
-    for ( const Json::Value* value : *root )
+    for ( const V3::Member& member : root )
     {
-        Check( value->name.GetStringLength() == 1, "iterate over the members" );
+        Check( member.GetName().GetLength() == 1, "iterate over the members" );
         count++;
     }
 
@@ -92,11 +94,11 @@ void TestFindAccessors()
 
 void TestProtoFields()
 {
-    Json::StructuredData sd;
-    Shape                shape;
+    V3::StructuredData sd;
+    Shape              shape;
 
     CheckStatus( ParseText( sd, "{\"text\":\"Color\",\"width\":5,\"height\":10}" ).status, Json::Status::kOk, "parse a shape without the optional field" );
-    CheckStatus( Json::Validate( sd, shape ), Json::Status::kOk, "validate a shape without the optional field" );
+    CheckStatus( V3::Validate( sd, shape ), Json::Status::kOk, "validate a shape without the optional field" );
     CheckStatus( sd.DeserializeTo( shape ), Json::Status::kOk, "deserialize a shape without the optional field" );
     Check( shape.text == "Color" && shape.width == 5 && shape.height == 10 && shape.depth == -1, "shape values" );
 
@@ -106,17 +108,17 @@ void TestProtoFields()
     Check( shape.depth == 3, "optional field value" );
 
     CheckStatus( ParseText( sd, "{\"text\":\"Color\",\"width\":5}" ).status, Json::Status::kOk, "parse a shape without a required field" );
-    CheckStatus( Json::Validate( sd, shape ), Json::Status::kNameNotPresent, "validate a shape without a required field" );
+    CheckStatus( V3::Validate( sd, shape ), Json::Status::kNameNotPresent, "validate a shape without a required field" );
     CheckStatus( sd.DeserializeTo( shape ), Json::Status::kNameNotPresent, "deserialize a shape without a required field" );
 
     CheckStatus( ParseText( sd, "{\"text\":\"Color\",\"width\":\"5\",\"height\":10}" ).status, Json::Status::kOk, "parse a shape with a wrong type" );
-    CheckStatus( Json::Validate( sd, shape ), Json::Status::kInvalidValueType, "validate a shape with a wrong type" );
+    CheckStatus( V3::Validate( sd, shape ), Json::Status::kInvalidValueType, "validate a shape with a wrong type" );
     CheckStatus( sd.DeserializeTo( shape ), Json::Status::kInvalidValueType, "deserialize a shape with a wrong type" );
 
     CheckStatus( ParseText( sd, "{\"text\":\"Color\",\"width\":5,\"height\":10,\"depth\":true}" ).status,
                  Json::Status::kOk,
                  "parse a shape with a wrong optional type" );
-    CheckStatus( Json::Validate( sd, shape ), Json::Status::kInvalidValueType, "validate a shape with a wrong optional type" );
+    CheckStatus( V3::Validate( sd, shape ), Json::Status::kInvalidValueType, "validate a shape with a wrong optional type" );
 
     CheckStatus( ParseText( sd, "[1]" ).status, Json::Status::kOk, "parse an array root" );
     CheckStatus( sd.DeserializeTo( shape ), Json::Status::kInvalidValueType, "deserialize a struct from an array" );

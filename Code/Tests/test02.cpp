@@ -3,6 +3,7 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 
 struct ObjectInObjectArray
 {
@@ -10,7 +11,7 @@ struct ObjectInObjectArray
     Terathon::String<> string;
 
 #define OBJECT_IN_OBJECT_ARRAY_PROTO "double", d, "string", string
-    DEFINE_JSON4C4_MEMBER_FUNCTIONS(OBJECT_IN_OBJECT_ARRAY_PROTO)
+    DEFINE_JSON4C4_MEMBER_FUNCTIONS( OBJECT_IN_OBJECT_ARRAY_PROTO )
 };
 
 struct Object
@@ -20,7 +21,7 @@ struct Object
     bool b = true;
 };
 #define OBJECT_PROTO "bool", object.b, "objectArray", object.objectInObjectArrayArray
-DEFINE_JSON4C4_FUNCTIONS(Object, OBJECT_PROTO)
+DEFINE_JSON4C4_FUNCTIONS( Object, OBJECT_PROTO )
 
 struct RootObject
 {
@@ -30,84 +31,86 @@ struct RootObject
     Terathon::Array<Terathon::String<>> stringArray;
 
 #define ROOT_OBJECT_PROTO "double", d, "doubleArray", doubleArray, "stringArray", stringArray, "object", object
-    DEFINE_JSON4C4_MEMBER_FUNCTIONS(ROOT_OBJECT_PROTO)
+    DEFINE_JSON4C4_MEMBER_FUNCTIONS( ROOT_OBJECT_PROTO )
 };
 
 int main()
 {
-    Json::StructuredData jSd;
+    V3::StructuredData jSd;
 
-    auto parseResult = jSd.Parse("Data/Test/test_file02.json");
+    auto parseResult = jSd.Parse( "Data/Test/test_file02.json" );
 
-    if (parseResult.status != Json::Status::kOk)
+    if ( parseResult.status != Json::Status::kOk )
     {
-        Terathon::String<256> errorDescription = Json::ParseResultToString(parseResult);
+        Terathon::String<256> errorDescription = Json::ParseResultToString( parseResult );
 
-        fprintf(stderr, "JSON parse error: %s\n", static_cast<const char*>(errorDescription));
+        fprintf( stderr, "JSON parse error: %s\n", static_cast<const char*>( errorDescription ) );
 
         return 1;
     }
 
     RootObject rootObject;
 
-    if (jSd.DeserializeTo(rootObject) != Json::Status::kOk)
+    if ( jSd.DeserializeTo( rootObject ) != Json::Status::kOk )
     {
-        fprintf(stderr, "Failed to deserialize.");
+        fprintf( stderr, "Failed to deserialize." );
         return 1;
     }
 
-    if (rootObject.d != 2.45e-2)
+    if ( rootObject.d != 2.45e-2 )
     {
-        fprintf(stderr, "trootObject.d not parsed correctly");
+        fprintf( stderr, "trootObject.d not parsed correctly" );
         return 1;
     }
 
-    if (rootObject.doubleArray[5] != 1.9643e-11)
+    if ( rootObject.doubleArray[ 5 ] != 1.9643e-11 )
     {
-        fprintf(stderr, "trootObject.d not parsed correctly");
+        fprintf( stderr, "trootObject.d not parsed correctly" );
         return 1;
     }
 
-    if (rootObject.object.objectInObjectArrayArray[2].string != "str7")
+    if ( rootObject.object.objectInObjectArrayArray[ 2 ].string != "str7" )
     {
-        fprintf(stderr, "trootObject.d not parsed correctly");
+        fprintf( stderr, "trootObject.d not parsed correctly" );
         return 1;
     }
 
-    rootObject.object.objectInObjectArrayArray[2].d = 3.14159e-17;
+    rootObject.object.objectInObjectArrayArray[ 2 ].d = 3.14159e-17;
 
-    jSd.SerializeFrom(rootObject);
-
-    jSd.Write("Data/Test/test_file02b.json");
-
-    Json::StructuredData jSd2;
-
-    parseResult = jSd2.Parse("Data/Test/test_file02b.json");
-
-    if (parseResult.status != Json::Status::kOk)
+    if ( ( jSd.SerializeFrom( rootObject ) != Json::Status::kOk ) || ( jSd.Write( "Data/Test/test_file02b.json" ) != Json::Status::kOk ) )
     {
-        Terathon::String<256> errorDescription = Json::ParseResultToString(parseResult);
+        fprintf( stderr, "Failed to serialize and write." );
+        return 1;
+    }
 
-        fprintf(stderr, "JSON parse error: %s\n", static_cast<const char*>(errorDescription));
+    V3::StructuredData jSd2;
+
+    parseResult = jSd2.Parse( "Data/Test/test_file02b.json" );
+
+    if ( parseResult.status != Json::Status::kOk )
+    {
+        Terathon::String<256> errorDescription = Json::ParseResultToString( parseResult );
+
+        fprintf( stderr, "JSON parse error: %s\n", static_cast<const char*>( errorDescription ) );
 
         return 1;
     }
 
     RootObject rootObject2;
 
-    if (jSd2.DeserializeTo(rootObject2) != Json::Status::kOk)
+    if ( jSd2.DeserializeTo( rootObject2 ) != Json::Status::kOk )
     {
-        fprintf(stderr, "Failed to deserialize.");
+        fprintf( stderr, "Failed to deserialize." );
         return 1;
     }
 
-    bool ok = (rootObject2.d == rootObject.d) && (rootObject2.doubleArray[5] == rootObject.doubleArray[5]) &&
-              (rootObject2.object.objectInObjectArrayArray[2].string == rootObject.object.objectInObjectArrayArray[2].string) &&
-              (rootObject2.object.objectInObjectArrayArray[2].d == rootObject.object.objectInObjectArrayArray[2].d);
+    bool ok = ( rootObject2.d == rootObject.d ) && ( rootObject2.doubleArray[ 5 ] == rootObject.doubleArray[ 5 ] ) &&
+              ( rootObject2.object.objectInObjectArrayArray[ 2 ].string == rootObject.object.objectInObjectArrayArray[ 2 ].string ) &&
+              ( rootObject2.object.objectInObjectArrayArray[ 2 ].d == rootObject.object.objectInObjectArrayArray[ 2 ].d );
 
-    if (!ok)
+    if ( !ok )
     {
-        fprintf(stderr, "Roundtrip failed.");
+        fprintf( stderr, "Roundtrip failed." );
         return 1;
     }
 

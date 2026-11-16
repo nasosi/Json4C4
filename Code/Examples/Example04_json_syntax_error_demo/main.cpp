@@ -31,6 +31,7 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 04: Similar to example 1, but uses an invalid file to demonstrate error reporting.
@@ -39,7 +40,7 @@ namespace TS   = Terathon;
 struct TextBox
 {
     TS::String<> text;
-    double       width = 0;
+    double       width  = 0;
     double       height = 0;
 };
 
@@ -54,8 +55,8 @@ int main()
     printf( "Example04 : Parsing error demonstration.\n" );
 
     // Parse the file
-    Json::StructuredData jsonStructuredData;
-    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/simple_error.json" );
+    V3::StructuredData jsonStructuredData;
+    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/simple_error.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {

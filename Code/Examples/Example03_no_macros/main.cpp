@@ -32,6 +32,7 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 03: Same as example02, but without macros.
@@ -43,18 +44,25 @@ struct Mechanical
     TS::Array<double> gearRatios;
 };
 
-inline Json::Status Deserialize( const Json::Value* value, Mechanical& o ) noexcept
+inline Json::Status DeserializeTraced( const V3::Value& value, Mechanical& o, V3::ReadPath& path ) noexcept
 {
-    return Json::DeserializeProto( value, "horsepower", o.horsepower, "gearRatios", o.gearRatios, "automatic", o.automatic );
+    return V3::DeserializeProto( value, path, "horsepower", o.horsepower, "gearRatios", o.gearRatios, "automatic", o.automatic );
 }
-inline Json::Status Validate( const Json::Value* value, const Mechanical& o ) noexcept
+inline Json::Status ValidateTraced( const V3::Value& value, const Mechanical& o, V3::ReadPath& path ) noexcept
 {
-    return Json::ValidateProto( value, "horsepower", o.horsepower, "gearRatios", o.gearRatios, "automatic", o.automatic );
+    return V3::ValidateProto( value, path, "horsepower", o.horsepower, "gearRatios", o.gearRatios, "automatic", o.automatic );
 }
 
-inline Json::Status Serialize( Json::Value* value, const Mechanical& o ) noexcept
+inline Json::Status Serialize( V3::Node node, const Mechanical& o ) noexcept
 {
-    return Json::SerializeProto( value, "horsepower", o.horsepower, "gearRatios", o.gearRatios, "automatic", o.automatic );
+    Json::Status status = node.SetObject();
+
+    if ( status != Json::Status::kOk )
+    {
+        return status;
+    }
+
+    return V3::SerializeProto( node, "horsepower", o.horsepower, "gearRatios", o.gearRatios, "automatic", o.automatic );
 }
 
 // If some members are private, the prototype functions need to be defined inside the class
@@ -71,22 +79,29 @@ public:
     Mechanical        mechanical;
     double            priceDollars = 0;
 
-    inline Json::Status Deserialize( const Json::Value* value ) noexcept
+    inline Json::Status DeserializeTraced( const V3::Value& value, V3::ReadPath& path ) noexcept
     {
-        return Json::DeserializeProto(
-            value, "make", make, "model", model, "rgbColor", color, "length", length, "width", width, "mechanical", mechanical, "price$", priceDollars );
+        return V3::DeserializeProto(
+            value, path, "make", make, "model", model, "rgbColor", color, "length", length, "width", width, "mechanical", mechanical, "price$", priceDollars );
     }
 
-    inline Json::Status Validate( const Json::Value* value ) const noexcept
+    inline Json::Status ValidateTraced( const V3::Value& value, V3::ReadPath& path ) const noexcept
     {
-        return Json::ValidateProto(
-            value, "make", make, "model", model, "rgbColor", color, "length", length, "width", width, "mechanical", mechanical, "price$", priceDollars );
+        return V3::ValidateProto(
+            value, path, "make", make, "model", model, "rgbColor", color, "length", length, "width", width, "mechanical", mechanical, "price$", priceDollars );
     }
 
-    inline Json::Status Serialize( Json::Value* value ) const noexcept
+    inline Json::Status Serialize( V3::Node node ) const noexcept
     {
-        return Json::SerializeProto(
-            value, "make", make, "model", model, "rgbColor", color, "length", length, "width", width, "mechanical", mechanical, "price$", priceDollars );
+        Json::Status status = node.SetObject();
+
+        if ( status != Json::Status::kOk )
+        {
+            return status;
+        }
+
+        return V3::SerializeProto(
+            node, "make", make, "model", model, "rgbColor", color, "length", length, "width", width, "mechanical", mechanical, "price$", priceDollars );
     }
 };
 
@@ -96,8 +111,8 @@ int main()
     printf( "Example03 : Same as example02, but without macros.\n" );
 
     // Parse data from a file
-    Json::StructuredData jsonStructuredData;
-    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/car.json" );
+    V3::StructuredData jsonStructuredData;
+    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/car.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {
@@ -113,7 +128,7 @@ int main()
 
     // Validate that the parsed Json structured data matches the process rules defined above. Then deserialize to the structure
     // If you take care for undefined -car- data after the following -if-, you could use Deserialize only.
-    if ( Json::Validate( jsonStructuredData, car ) != Json::Status::kOk )
+    if ( V3::Validate( jsonStructuredData, car ) != Json::Status::kOk )
     {
         fprintf( stderr, "Structure validation error\n" );
         return 1;

@@ -32,6 +32,7 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 02: Parsing, validating, deserializing and serializing a class. The "Car" class has some member variables
@@ -74,8 +75,8 @@ int main()
     printf( "Example02 : A non trivial example involving parsing, validation, deserialization, serialization and writing to files.\n" );
 
     // Parse data from a file
-    Json::StructuredData jsonStructuredData;
-    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/car.json" );
+    V3::StructuredData jsonStructuredData;
+    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/car.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {
@@ -91,7 +92,7 @@ int main()
 
     // Validate that the parsed Json structured data matches the process rules defined above. Then deserialize to the structure
     // If you take care for undefined -car- data after the following -if-, you could use Deserialize only.
-    if ( Json::Validate( jsonStructuredData, car ) != Json::Status::kOk )
+    if ( V3::Validate( jsonStructuredData, car ) != Json::Status::kOk )
     {
         fprintf( stderr, "Structure validation error\n" );
         return 1;

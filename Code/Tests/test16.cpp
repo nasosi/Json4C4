@@ -7,10 +7,12 @@
 
 #endif
 
+namespace V3 = Json::V3;
+
 int main()
 {
     {
-        Json::StructuredData sd;
+        V3::StructuredData sd;
 
         CheckStatus( sd.Parse( "Data/Test/does_not_exist.json" ).status, Json::Status::kFileOpenError, "parse a missing file" );
         Json::Status status = sd.Parse( "Data/Test" ).status;
@@ -22,30 +24,29 @@ int main()
     {
         Check( WriteTextFile( "Data/Test/out_test16_empty.json", "" ), "write an empty file" );
 
-        Json::StructuredData sd;
+        V3::StructuredData sd;
         CheckStatus( sd.Parse( "Data/Test/out_test16_empty.json" ).status, Json::Status::kTextBufferContentsInvalid, "parse an empty file" );
     }
 
     {
         Check( WriteTextFile( "Data/Test/out_test16_digit.json", "7" ), "write a one byte file" );
 
-        Json::StructuredData sd;
+        V3::StructuredData sd;
         CheckStatus( sd.Parse( "Data/Test/out_test16_digit.json" ).status, Json::Status::kOk, "parse a one byte file" );
-        Check( sd.GetRootJsonValue() && sd.GetRootJsonValue()->GetDataAsPointerTo<double>() && *sd.GetRootJsonValue()->GetDataAsPointerTo<double>() == 7,
-               "one byte file value" );
+        Check( sd.GetRoot() && sd.GetRoot()->AsNumber() && *sd.GetRoot()->AsNumber() == 7, "one byte file value" );
     }
 
     {
         Check( WriteTextFile( "Data/Test/out_test16_crlf.json", "{\r\n  \"a\" : 1,\r\n  \"b\" : ]\r\n}" ), "write a CRLF file" );
 
-        Json::StructuredData sd;
-        Json::ParseResult    parseResult = sd.Parse( "Data/Test/out_test16_crlf.json" );
+        V3::StructuredData sd;
+        Json::ParseResult  parseResult = sd.Parse( "Data/Test/out_test16_crlf.json" );
         CheckStatus( parseResult.status, Json::Status::kExpectedJsonValue, "parse a CRLF file with an error" );
         Check( parseResult.errorLine == 3 && parseResult.errorColumn == 9, "error position in a CRLF file" );
     }
 
     {
-        Json::StructuredData sd;
+        V3::StructuredData sd;
         CheckStatus( ParseText( sd, "{\"a\":1}" ).status, Json::Status::kOk, "parse a document to write" );
         CheckStatus( sd.Write( "Data/Test/no_such_directory/file.json" ), Json::Status::kFileOpenError, "write into a missing directory" );
         CheckStatus( sd.Write( "Data/Test" ), Json::Status::kFileOpenError, "write onto a directory" );
@@ -54,7 +55,7 @@ int main()
 #ifdef __linux__
 
     {
-        Json::StructuredData sd;
+        V3::StructuredData sd;
         CheckStatus( ParseText( sd, "{\"a\":2}" ).status, Json::Status::kOk, "parse a document to save" );
 
         Check( WriteTextFile( "Data/Test/out_test16_private.json", "{\"a\":1}" ), "write a private file" );

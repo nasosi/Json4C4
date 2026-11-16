@@ -3,6 +3,7 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 
 const char* mustFail[] = {
     "Data/Test/jsonchecker/fail2.json",  "Data/Test/jsonchecker/fail3.json",  "Data/Test/jsonchecker/fail4.json",  "Data/Test/jsonchecker/fail5.json",
@@ -24,7 +25,7 @@ int main()
 {
     for ( auto a = 0; a != 30; a++ )
     {
-        Json::StructuredData jSd;
+        V3::StructuredData jSd;
 
         auto parseResult = jSd.Parse( mustFail[ a ] );
 
@@ -48,7 +49,7 @@ int main()
 
     for ( auto a = 0; a != 5; a++ )
     {
-        Json::StructuredData jSd;
+        V3::StructuredData jSd;
 
         auto parseResult = jSd.Parse( mustPass[ a ] );
 

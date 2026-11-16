@@ -2,7 +2,12 @@
 
 #include <cstdlib>
 
-bool SameResult( Json::StructuredData& first, const Json::ParseResult& firstResult, Json::StructuredData& second, const Json::ParseResult& secondResult )
+namespace V3 = Json::V3;
+
+bool SameResult( const V3::StructuredData& first,
+                 const Json::ParseResult&  firstResult,
+                 const V3::StructuredData& second,
+                 const Json::ParseResult&  secondResult )
 {
     if ( ( firstResult.status != secondResult.status ) || ( firstResult.errorLine != secondResult.errorLine ) ||
          ( firstResult.errorColumn != secondResult.errorColumn ) )
@@ -17,10 +22,9 @@ bool SameResult( Json::StructuredData& first, const Json::ParseResult& firstResu
 
     Terathon::Array<char> firstText;
     Terathon::Array<char> secondText;
-    Terathon::Array<char> indentation;
 
-    first.GetRootJsonValue()->Write( firstText, 2, ' ', indentation );
-    second.GetRootJsonValue()->Write( secondText, 2, ' ', indentation );
+    first.Write( firstText );
+    second.Write( secondText );
 
     return ( firstText.GetArrayElementCount() == secondText.GetArrayElementCount() ) &&
            ( memcmp( firstText.begin(), secondText.begin(), size_t( firstText.GetArrayElementCount() ) ) == 0 );
@@ -36,12 +40,12 @@ void CheckBounded( const char* text, size_t length, const char* description )
     char* exact = static_cast<char*>( malloc( ( length != 0 ) ? length : 1 ) );
     memcpy( exact, text, length );
 
-    Json::StructuredData bounded;
-    Json::StructuredData followed;
-    Json::StructuredData terminated;
-    Json::ParseResult    boundedResult    = bounded.ParseText( exact, length );
-    Json::ParseResult    followedResult   = followed.ParseText( text, length );
-    Json::ParseResult    terminatedResult = ParseText( terminated, text, length );
+    V3::StructuredData bounded;
+    V3::StructuredData followed;
+    V3::StructuredData terminated;
+    Json::ParseResult  boundedResult    = bounded.ParseText( exact, length );
+    Json::ParseResult  followedResult   = followed.ParseText( text, length );
+    Json::ParseResult  terminatedResult = terminated.Parse( MakeTextBuffer( text, length ) );
 
     bool same = SameResult( bounded, boundedResult, followed, followedResult ) && SameResult( bounded, boundedResult, terminated, terminatedResult );
 
@@ -182,7 +186,7 @@ void TestLongTails()
         char*  exact  = static_cast<char*>( malloc( length ) );
         memcpy( exact, c.text, length );
 
-        Json::StructuredData sd;
+        V3::StructuredData sd;
         CheckStatus( sd.ParseText( exact, length ).status, c.status, "a text with a long tail" );
         CheckBounded( c.text, length, "a text with a long tail" );
 
@@ -192,11 +196,11 @@ void TestLongTails()
 
 void TestEdges()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
 
     CheckStatus( sd.ParseText( "[1]", 3 ).status, Json::Status::kOk, "a text without a terminating zero" );
     CheckStatus( sd.ParseText( nullptr, 5 ).status, Json::Status::kTextBufferContentsInvalid, "no text" );
-    Check( sd.GetRootJsonValue() == nullptr, "a failed parse clears the previous document" );
+    Check( sd.GetRoot() == nullptr, "a failed parse clears the previous document" );
     CheckStatus( sd.ParseText( "[1]", 0 ).status, Json::Status::kTextBufferContentsInvalid, "an empty text" );
     CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x7FFFFF01U ) ).status, Json::Status::kFileTooLarge, "a text one byte longer than the limit" );
     CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x80000000U ) ).status, Json::Status::kFileTooLarge, "a text longer than the limit" );
@@ -213,11 +217,11 @@ void TestEdges()
 // Calls written for 2.2 keep their meaning next to ParseText.
 void TestParseOverloads()
 {
-    Json::StructuredData  sd;
+    V3::StructuredData    sd;
     Terathon::Array<char> buffer = MakeTextBuffer( "[1]", 3 );
 
     CheckStatus( sd.Parse( "Data/Examples/simple.json", {} ).status, Json::Status::kOk, "a file with braced options" );
-    Check( sd.GetRootJsonValue() && sd.GetRootJsonValue()->AsJsonObjectValue(), "a file with braced options is read" );
+    Check( sd.GetRoot() && sd.GetRoot()->AsObject(), "a file with braced options is read" );
     CheckStatus( sd.Parse( buffer, {} ).status, Json::Status::kOk, "a buffer with braced options" );
     CheckStatus( sd.Parse( "Data/Examples/simple.json" ).status, Json::Status::kOk, "a file without options" );
     CheckStatus( sd.Parse( buffer ).status, Json::Status::kOk, "a buffer without options" );
@@ -225,8 +229,8 @@ void TestParseOverloads()
 
 void TestLimits()
 {
-    Json::StructuredData sd;
-    Json::ParseOptions   options;
+    V3::StructuredData sd;
+    Json::ParseOptions options;
 
     options.maxValueCount = 4;
     CheckStatus( ParseText( sd, "[1,2,3]", options ).status, Json::Status::kOk, "as many values as the limit" );
@@ -234,7 +238,7 @@ void TestLimits()
     options.maxValueCount    = 3;
     Json::ParseResult result = ParseText( sd, "[1,2,3]", options );
     CheckStatus( result.status, Json::Status::kMaximumValueCountExceeded, "one value more than the limit" );
-    Check( ( result.errorLine == 1 ) && ( result.errorColumn == 6 ) && ( sd.GetRootJsonValue() == nullptr ), "the value past the limit is reported" );
+    Check( ( result.errorLine == 1 ) && ( result.errorColumn == 6 ) && ( sd.GetRoot() == nullptr ), "the value past the limit is reported" );
 
     options.maxValueCount = 0;
     CheckStatus( ParseText( sd, "1", options ).status, Json::Status::kMaximumValueCountExceeded, "a limit of no values" );
@@ -248,7 +252,7 @@ void TestLimits()
     options.maxStringByteCount = 6;
     result                     = ParseText( sd, strings, options );
     CheckStatus( result.status, Json::Status::kMaximumStringByteCountExceeded, "one string byte more than the limit" );
-    Check( ( result.errorLine == 1 ) && ( result.errorColumn == 16 ) && ( sd.GetRootJsonValue() == nullptr ), "the string past the limit is reported" );
+    Check( ( result.errorLine == 1 ) && ( result.errorColumn == 16 ) && ( sd.GetRoot() == nullptr ), "the string past the limit is reported" );
 
     options.maxStringByteCount = 4;
     CheckStatus( ParseText( sd, strings, options ).status, Json::Status::kMaximumStringByteCountExceeded, "names count as string bytes" );

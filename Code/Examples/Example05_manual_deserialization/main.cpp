@@ -31,6 +31,7 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
+namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 05: Simple parsing and manual json structure query.
@@ -41,8 +42,8 @@ int main()
     printf( "Example05 : Simple parsing and manual JSON structure query.\n" );
 
     // Parse the file and check for parsing errors.
-    Json::StructuredData jsonStructuredData;
-    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
+    V3::StructuredData jsonStructuredData;
+    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {
@@ -54,18 +55,18 @@ int main()
     }
 
     // Get the root json value
-    Json::Value* root = jsonStructuredData.GetRootJsonValue();
+    const V3::Value* root = jsonStructuredData.GetRoot();
 
-    // Cast it to a Json::ObjectValue, which is essentially a map.
-    Json::ObjectValue* objectValue = root->AsJsonObjectValue();
-    if ( !objectValue )
+    // View it as an object, which is essentially a map.
+    V3::ObjectView object = root->AsObject();
+    if ( !object )
     {
-        fprintf( stderr, "Error: expected a Json::ObjectValue as the root of the parsed data structure.\n" );
+        fprintf( stderr, "Error: expected an object as the root of the parsed data structure.\n" );
         return 1;
     }
 
     // Get the value of key "width". If the query was not succesful exit.
-    const double* width = objectValue->FindNumber( "width" );
+    const double* width = object.FindNumber( "width" );
     if ( !width )
     {
         fprintf( stderr, "Error: expected a number value for the item with name \"width\".\n" );

@@ -3,6 +3,8 @@
 
 #include "TestCheck.h"
 
+namespace V3 = Json::V3;
+
 using Terathon::Array;
 using Terathon::String;
 
@@ -63,8 +65,8 @@ DEFINE_JSON4C4_FUNCTIONS( OpenXrApiLayerManifest, OPENXR_API_LAYER_MANIFEST_PROT
 
 int main()
 {
-    const char* runtime         = R"({ "file_format_version": "1.0.0", "runtime": { "name": "Vortex", "library_path": "./vortex_runtime.dll" } })";
-    const char* layer           = R"({
+    const char* runtime            = R"({ "file_format_version": "1.0.0", "runtime": { "name": "Vortex", "library_path": "./vortex_runtime.dll" } })";
+    const char* layer              = R"({
         "file_format_version": "1.0.0",
         "api_layer": {
             "name": "XR_APILAYER_vortex_validation",
@@ -76,18 +78,31 @@ int main()
             "instance_extensions": [ { "name": "XR_EXT_debug_utils", "extension_version": "4" }, { "name": "XR_EXT_hand_tracking", "extension_version": "1" } ],
             "disable_environment": "DISABLE_VORTEX_LAYER"
         } })";
-    const char* missingRequired = R"({ "file_format_version": "1.0.0", "runtime": { "name": "Vortex" } })";
+    const char* missingRequired    = R"({ "file_format_version": "1.0.0", "runtime": { "name": "Vortex" } })";
+    const char* incompleteOptional = R"({
+        "file_format_version": "1.0.0",
+        "api_layer": {
+            "name": "XR_APILAYER_vortex_validation",
+            "library_path": "./vortex_layer.dll",
+            "api_version": "1.0",
+            "implementation_version": "1",
+            "description": "Vortex validation layer",
+            "functions": {},
+            "instance_extensions": [ { "name": "XR_EXT_debug_utils" } ]
+        } })";
+    const char* zeroInString =
+        "{ \"file_format_version\": \"1.0.0\", \"runtime\": { \"name\": \"Vor\\u0000tex\", \"library_path\": \"./vortex_runtime.dll\" } }";
 
-    Json::StructuredData  sd;
+    V3::StructuredData    sd;
     OpenXrRuntimeManifest runtimeManifest;
     CheckStatus( ParseText( sd, runtime ).status, Json::Status::kOk, "parse a runtime manifest" );
-    CheckStatus( Json::Validate( sd, runtimeManifest ), Json::Status::kOk, "validate a runtime manifest" );
+    CheckStatus( V3::Validate( sd, runtimeManifest ), Json::Status::kOk, "validate a runtime manifest" );
     CheckStatus( sd.DeserializeTo( runtimeManifest ), Json::Status::kOk, "deserialize a runtime manifest" );
     Check( runtimeManifest.runtimeDescriptor.libraryPath == "./vortex_runtime.dll" && runtimeManifest.runtimeDescriptor.name == "Vortex", "runtime fields" );
 
     OpenXrApiLayerManifest* layerManifest = new OpenXrApiLayerManifest;
     CheckStatus( ParseText( sd, layer ).status, Json::Status::kOk, "parse a layer manifest" );
-    CheckStatus( Json::Validate( sd, *layerManifest ), Json::Status::kOk, "validate a layer manifest" );
+    CheckStatus( V3::Validate( sd, *layerManifest ), Json::Status::kOk, "validate a layer manifest" );
     CheckStatus( sd.DeserializeTo( *layerManifest ), Json::Status::kOk, "deserialize a layer manifest" );
 
     const ApiLayerDescriptor& d = layerManifest->apiLayerDescriptor;
@@ -103,7 +118,15 @@ int main()
 
     OpenXrRuntimeManifest invalid;
     CheckStatus( ParseText( sd, missingRequired ).status, Json::Status::kOk, "parse a manifest that misses a required field" );
-    Check( Json::Validate( sd, invalid ) != Json::Status::kOk, "a missing required field fails validation" );
+    Check( V3::Validate( sd, invalid ) != Json::Status::kOk, "a missing required field fails validation" );
+
+    OpenXrApiLayerManifest incomplete;
+    CheckStatus( ParseText( sd, incompleteOptional ).status, Json::Status::kOk, "parse a layer manifest with an incomplete instance extension" );
+    CheckStatus( V3::Validate( sd, incomplete ), Json::Status::kNameNotPresent, "an optional member that is present must be complete to validate" );
+    CheckStatus( sd.DeserializeTo( incomplete ), Json::Status::kNameNotPresent, "an optional member that is present must be complete to deserialize" );
+
+    CheckStatus( ParseText( sd, zeroInString ).status, Json::Status::kOk, "parse a manifest with an escaped zero in a string" );
+    CheckStatus( V3::Validate( sd, invalid ), Json::Status::kStringHoldsZero, "a String<> refuses an escaped zero" );
 
     return TestResult();
 }

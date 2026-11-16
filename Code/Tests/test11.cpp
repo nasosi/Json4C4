@@ -1,5 +1,28 @@
-#include "TestAllocation.h"
 #include "TestCheck.h"
+
+#include <cstdlib>
+
+namespace V3 = Json::V3;
+
+// Hands out blocks with malloc and counts the blocks not handed back.
+class CountingSource final : public V3::BlockSource
+{
+public:
+    int outstandingCount = 0;
+
+    void* AllocateBlock( Terathon::uint64 size ) noexcept override
+    {
+        outstandingCount++;
+
+        return malloc( size_t( size ) );
+    }
+
+    void FreeBlock( void* block, Terathon::uint64 ) noexcept override
+    {
+        outstandingCount--;
+        free( block );
+    }
+};
 
 struct Repeated
 {
@@ -26,12 +49,12 @@ const char* const duplicateDocument = "{\"a\":1,\"a\":[2,3,4],\"b\":2,\"a\":{\"c
 
 void TestDuplicateKeysRejected()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
 
     Json::ParseResult parseResult = ParseText( sd, duplicateDocument );
     CheckStatus( parseResult.status, Json::Status::kDuplicateName, "duplicate keys are rejected by default" );
     Check( parseResult.errorLine == 1 && parseResult.errorColumn == 8, "the error points at the repeated name" );
-    Check( sd.GetRootJsonValue() == nullptr, "a rejected document leaves no root" );
+    Check( sd.GetRoot() == nullptr, "a rejected document leaves no root" );
 
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":{\"a\":2}}" ).status, Json::Status::kOk, "the same name in different objects is not a duplicate" );
 }
@@ -41,19 +64,19 @@ void TestDuplicateKeysKept( Json::DuplicateNames policy, double expected, const 
     Json::ParseOptions options;
     options.duplicateNames = policy;
 
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, duplicateDocument, options ).status, Json::Status::kOk, description );
 
-    const Json::ObjectValue* root = sd.GetRootJsonValue() ? sd.GetRootJsonValue()->AsJsonObjectValue() : nullptr;
-    Check( root && root->GetMapElementCount() == 2, "duplicate keys are stored once" );
+    V3::ObjectView root = sd.GetRoot() ? sd.GetRoot()->AsObject() : V3::ObjectView();
+    Check( root.GetMemberCount() == 2, "duplicate keys are stored once" );
 
     if ( expected != 0 )
     {
-        Check( root && root->FindNumber( "a" ) && *root->FindNumber( "a" ) == expected, description );
+        Check( root.FindNumber( "a" ) && *root.FindNumber( "a" ) == expected, description );
     }
     else
     {
-        Check( root && root->FindJsonObjectValue( "a" ) && root->FindJsonObjectValue( "a" )->FindNumber( "c" ), description );
+        Check( root.FindObject( "a" ).FindNumber( "c" ) != nullptr, description );
     }
 
     CheckStatus( sd.Write( "Data/Test/out_test11_duplicates.json" ), Json::Status::kOk, "write a document that had duplicate keys" );
@@ -62,115 +85,94 @@ void TestDuplicateKeysKept( Json::DuplicateNames policy, double expected, const 
     Check( ReadTextFile( "Data/Test/out_test11_duplicates.json", text ) && CountOccurrences( text, "\"a\"" ) == 1, "a duplicate key is written once" );
     Check( strstr( text, "\"a\"" ) < strstr( text, "\"b\"" ), "a duplicate key keeps the position of its first occurrence" );
 
-#ifdef JSON4C4_TEST_ALLOCATION_HOOK
-
-    long liveBefore = allocationLiveCount;
+    CountingSource source;
 
     for ( int a = 0; a < 100; a++ )
     {
-        Json::StructuredData repeated;
+        V3::StructuredData repeated( source );
         ParseText( repeated, "{\"a\":1,\"a\":[2,3,4],\"a\":{\"b\":[5]}}", options );
     }
 
-    Check( allocationLiveCount == liveBefore, "duplicate keys do not leak" );
-
-#endif
+    Check( source.outstandingCount == 0, "duplicate keys do not leak" );
 }
 
 void TestOrderSurvivesDirectChanges()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":2,\"c\":3}" ).status, Json::Status::kOk, "parse three members" );
 
-    Json::ObjectValue* root = sd.GetRootJsonValue()->AsJsonObjectValue();
+    const V3::Value& root = *sd.GetRoot();
 
-    Json::Value* detached = root->FindValue( "c" );
+    CheckStatus( sd.RemoveMember( root, "a" ), Json::Status::kOk, "remove the first member" );
+    CheckStatus( sd.RemoveMember( root, "c" ), Json::Status::kOk, "remove the last member" );
 
-    delete root->FindValue( "a" );
-    detached->Detach();
-
-    CheckStatus( sd.Write( "Data/Test/out_test11_direct.json" ), Json::Status::kOk, "write after deleting and detaching members" );
+    CheckStatus( sd.Write( "Data/Test/out_test11_direct.json" ), Json::Status::kOk, "write after removing members" );
 
     Terathon::String<> text;
-    Check( ReadTextFile( "Data/Test/out_test11_direct.json", text ) && text == "{\n  \"b\" : 2\n}", "deleted and detached members are not written" );
+    Check( ReadTextFile( "Data/Test/out_test11_direct.json", text ) && text == "{\n  \"b\" : 2\n}", "removed members are not written" );
 
-    Json::StructuredData other;
+    V3::StructuredData other;
     CheckStatus( ParseText( other, "{\"x\":0}" ).status, Json::Status::kOk, "parse a second object" );
 
-    Json::ObjectValue* otherRoot = other.GetRootJsonValue()->AsJsonObjectValue();
-    Check( otherRoot->InsertAccountedMapElement( root->FindValue( "b" ) ), "move a member to another object" );
+    CheckStatus( other.AddMember( *other.GetRoot(), "b", *root.AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another object" );
+    CheckStatus( sd.RemoveMember( root, "b" ), Json::Status::kOk, "remove the copied member from its object" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_direct.json" ), Json::Status::kOk, "write the object a member moved out of" );
     Check( ReadTextFile( "Data/Test/out_test11_direct.json", text ) && text == "{\n}", "a moved member leaves its old object" );
 
     CheckStatus( other.Write( "Data/Test/out_test11_direct.json" ), Json::Status::kOk, "write the object a member moved into" );
     Check( ReadTextFile( "Data/Test/out_test11_direct.json", text ) && text == "{\n  \"x\" : 0,\n  \"b\" : 2\n}", "a moved member is written once, last" );
-
-    delete detached;
 }
 
 void TestDuplicateNames()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
 
     CheckStatus( sd.SerializeFrom( Repeated() ), Json::Status::kDuplicateName, "a proto that repeats a name" );
-    Check( sd.GetRootJsonValue() == nullptr, "a failed SerializeFrom does not set a root" );
+    Check( sd.GetRoot() == nullptr, "a failed SerializeFrom does not set a root" );
 
-#ifdef JSON4C4_TEST_ALLOCATION_HOOK
-
-    long liveBefore = allocationLiveCount;
+    CountingSource source;
 
     {
-        Json::StructuredData repeated;
+        V3::StructuredData repeated( source );
         repeated.SerializeFrom( Repeated() );
+        Check( source.outstandingCount == 0, "a failed SerializeFrom hands every block back" );
     }
 
-    Check( allocationLiveCount == liveBefore, "a repeated name does not leak" );
-
-#endif
+    Check( source.outstandingCount == 0, "a repeated name does not leak" );
 }
 
 void TestAccountedMap()
 {
-    Json::StructuredData sd;
+    V3::StructuredData sd;
 
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":2,\"c\":3}" ).status, Json::Status::kOk, "parse three members" );
 
-    Json::ObjectValue* root = sd.GetRootJsonValue()->AsJsonObjectValue();
+    const V3::Value& root = *sd.GetRoot();
 
-    Json::Value* removed = root->RemoveAccountedMapElement( "b" );
-    Check( removed != nullptr && removed->name == "b", "remove a member" );
-    delete removed;
-
-    Check( root->RemoveAccountedMapElement( "missing" ) == nullptr, "remove a missing member" );
+    CheckStatus( sd.RemoveMember( root, "b" ), Json::Status::kOk, "remove a member" );
+    CheckStatus( sd.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_accounted.json" ), Json::Status::kOk, "write after removing a member" );
 
-    Json::StructuredData reparsed;
+    V3::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test11_accounted.json" ).status, Json::Status::kOk, "reparse after removing a member" );
 
-    const Json::ObjectValue* reparsedRoot = reparsed.GetRootJsonValue()->AsJsonObjectValue();
-    Check( reparsedRoot->GetMapElementCount() == 2 && reparsedRoot->FindNumber( "a" ) && reparsedRoot->FindNumber( "c" ) && !reparsedRoot->FindNumber( "b" ),
+    V3::ObjectView reparsedRoot = reparsed.GetRoot()->AsObject();
+    Check( reparsedRoot.GetMemberCount() == 2 && reparsedRoot.FindNumber( "a" ) && reparsedRoot.FindNumber( "c" ) && !reparsedRoot.FindNumber( "b" ),
            "the removed member is not written" );
 
-    Json::Value* element = Json::Detail::CreateValueFor( 5.0 );
-    element->name        = "z";
-    CheckStatus( Json::Serialize( element, 5.0 ), Json::Status::kOk, "serialize a new member" );
-    Check( root->InsertAccountedMapElement( element ), "insert a new member" );
+    CheckStatus( sd.AddMember( root, "z", 5.0 ), Json::Status::kOk, "insert a new member" );
+    CheckStatus( sd.AddMember( root, "z", 6.0 ), Json::Status::kDuplicateName, "a duplicate insert is refused" );
 
-    Json::Value* duplicate = Json::Detail::CreateValueFor( 6.0 );
-    duplicate->name        = "z";
-    Check( !root->InsertAccountedMapElement( duplicate ), "a duplicate insert is refused" );
-    delete duplicate;
+    Check( root.AsObject().FindNumber( "z" ) && *root.AsObject().FindNumber( "z" ) == 5.0, "the first inserted member stays" );
 
-    Check( root->FindNumber( "z" ) && *root->FindNumber( "z" ) == 5.0, "the first inserted member stays" );
-
-    root->PurgeAccountedMap();
-    Check( root->GetMapElementCount() == 0, "purge removes every member" );
+    CheckStatus( sd.SerializeAt( root, Json::ObjectMap<double>() ), Json::Status::kOk, "serialize an empty map onto the object" );
+    Check( root.AsObject() && root.AsObject().GetMemberCount() == 0, "purge removes every member" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_accounted.json" ), Json::Status::kOk, "write after purging" );
     CheckStatus( reparsed.Parse( "Data/Test/out_test11_accounted.json" ).status, Json::Status::kOk, "reparse after purging" );
-    Check( reparsed.GetRootJsonValue()->AsJsonObjectValue()->GetMapElementCount() == 0, "an empty object is written" );
+    Check( reparsed.GetRoot()->AsObject() && reparsed.GetRoot()->AsObject().GetMemberCount() == 0, "an empty object is written" );
 }
 
 Terathon::String<> LargeObjectText( int count, const char* extraMember )
@@ -195,16 +197,16 @@ void TestLargeObject()
     const int count = 100;
     char      name[ 16 ];
 
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, LargeObjectText( count, "" ) ).status, Json::Status::kOk, "parse an object with many members" );
 
-    Json::ObjectValue* root  = sd.GetRootJsonValue()->AsJsonObjectValue();
-    bool               found = ( root->GetMapElementCount() == count ) && !root->FindValue( "k100" );
+    V3::ObjectView root  = sd.GetRoot()->AsObject();
+    bool           found = ( root.GetMemberCount() == Terathon::uint32( count ) ) && !root.Find( "k100" );
 
     for ( int a = 0; a < count; a++ )
     {
         snprintf( name, sizeof( name ), "k%d", a );
-        found = found && root->FindNumber( name ) && ( *root->FindNumber( name ) == a );
+        found = found && root.FindNumber( name ) && ( *root.FindNumber( name ) == a );
     }
 
     Check( found, "every member of a large object is found" );
@@ -212,10 +214,10 @@ void TestLargeObject()
     int  position = 0;
     bool ordered  = true;
 
-    for ( const Json::Value* value : *root )
+    for ( const V3::Member& member : root )
     {
         snprintf( name, sizeof( name ), "k%d", position++ );
-        ordered = ordered && ( value->name == name );
+        ordered = ordered && ( member.GetName() == name );
     }
 
     Check( ordered, "a large object keeps document order" );
@@ -227,23 +229,26 @@ void TestLargeObject()
 
     CheckStatus( ParseText( sd, LargeObjectText( count, ",\"k50\":-1" ), keepLast ).status, Json::Status::kOk, "keep the last duplicate in a large object" );
 
-    root = sd.GetRootJsonValue()->AsJsonObjectValue();
-    Check( ( root->GetMapElementCount() == count ) && ( *root->FindNumber( "k50" ) == -1 ) && ( root->begin()[ 50 ]->name == "k50" ),
+    root = sd.GetRoot()->AsObject();
+    Check( ( root.GetMemberCount() == Terathon::uint32( count ) ) && ( *root.FindNumber( "k50" ) == -1 ) && ( root.begin()[ 50 ].GetName() == "k50" ),
            "the last value of a duplicate takes the first one's place" );
 
-    delete root->FindValue( "k10" );
-    Json::Value* removed = root->RemoveAccountedMapElement( "k20" );
+    CheckStatus( sd.RemoveMember( *sd.GetRoot(), "k10" ), Json::Status::kOk, "remove a member of a large object" );
+    CheckStatus( sd.RemoveMember( *sd.GetRoot(), "k20" ), Json::Status::kOk, "remove another member of a large object" );
 
-    found = ( removed != nullptr ) && ( root->GetMapElementCount() == count - 2 ) && !root->FindValue( "k10" ) && !root->FindValue( "k20" );
+    found = ( root.GetMemberCount() == Terathon::uint32( count - 2 ) ) && !root.Find( "k10" ) && !root.Find( "k20" );
 
     for ( int a = 0; a < count; a++ )
     {
         snprintf( name, sizeof( name ), "k%d", a );
-        found = found && ( ( a == 10 ) || ( a == 20 ) || root->FindValue( name ) );
+        found = found && ( ( a == 10 ) || ( a == 20 ) || root.Find( name ) );
     }
 
     Check( found, "members removed from a large object are gone and the others are still found" );
-    Check( root->InsertAccountedMapElement( removed ) && ( root->begin()[ count - 2 ] == removed ) && ( root->FindValue( "k20" ) == removed ),
+
+    CheckStatus( sd.AddMember( *sd.GetRoot(), "k20", 20.0 ), Json::Status::kOk, "insert a removed member again" );
+    Check( ( root.GetMemberCount() == Terathon::uint32( count - 1 ) ) && ( root.begin()[ count - 2 ].GetName() == "k20" ) &&
+               ( root.Find( "k20" ) == &root.begin()[ count - 2 ].GetValue() ) && ( *root.FindNumber( "k20" ) == 20 ),
            "a member inserted again goes last and is found" );
 }
 

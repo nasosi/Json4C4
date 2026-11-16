@@ -170,6 +170,31 @@ inline Json::ParseResult ParseText( Json::StructuredData& sd, const char* text, 
     return ParseText( sd, text, strlen( text ), options );
 }
 
+inline Json::ParseResult ParseText( Json::V3::StructuredData& data, const char* text, size_t length, const Json::ParseOptions& options = Json::ParseOptions() )
+{
+    return data.ParseText( text, Terathon::uint64( length ), options );
+}
+
+inline Json::ParseResult ParseText( Json::V3::StructuredData& data, const char* text, const Json::ParseOptions& options = Json::ParseOptions() )
+{
+    return ParseText( data, text, strlen( text ), options );
+}
+
+// The text a document writes, with a terminating zero.
+inline Terathon::String<> WriteText( const Json::V3::StructuredData& data, unsigned int indentationLength = 2 )
+{
+    Terathon::Array<char> text;
+
+    if ( data.Write( text, indentationLength ) != Json::Status::kOk )
+    {
+        return "(not written)";
+    }
+
+    text.AppendArrayElement( 0 );
+
+    return Terathon::String<>( text.begin() );
+}
+
 inline bool ReadTextFile( const char* fileName, Terathon::String<>& text )
 {
     FILE* file = fopen( fileName, "rb" );

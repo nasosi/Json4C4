@@ -2,9 +2,11 @@
 
 #include <chrono>
 
-const Json::ObjectValue* Root( const Json::StructuredData& sd )
+namespace V3 = Json::V3;
+
+V3::ObjectView Root( const V3::StructuredData& sd )
 {
-    return sd.GetRootJsonValue() ? sd.GetRootJsonValue()->AsJsonObjectValue() : nullptr;
+    return sd.GetRoot() ? sd.GetRoot()->AsObject() : V3::ObjectView();
 }
 
 // Names that share a long prefix and come in falling order, the order that is slowest to keep sorted one name at a time.
@@ -38,16 +40,16 @@ void TestManyNames()
 
     auto start = std::chrono::steady_clock::now();
 
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( sd.ParseText( text.begin(), Terathon::uint64( text.GetArrayElementCount() ) ).status, Json::Status::kOk, "parse an object of many names" );
 
-    const Json::ObjectValue* root  = Root( sd );
-    bool                     found = root && ( root->GetMapElementCount() == count );
+    V3::ObjectView root  = Root( sd );
+    bool           found = root.GetMemberCount() == Terathon::uint32( count );
 
     for ( int a = 0; found && ( a < count ); a++ )
     {
         snprintf( member, sizeof( member ), "%s%06d", static_cast<const char*>( prefix ), count - a );
-        found = root->FindNumber( member ) && ( *root->FindNumber( member ) == a );
+        found = root.FindNumber( member ) && ( *root.FindNumber( member ) == a );
     }
 
     double seconds = std::chrono::duration<double>( std::chrono::steady_clock::now() - start ).count();
@@ -107,11 +109,11 @@ LargeObject MakeLargeObject( bool early = false )
     return object;
 }
 
-void CheckMembers( const Json::ObjectValue* root, double k5, double k25, const char* description )
+void CheckMembers( V3::ObjectView root, double k5, double k25, const char* description )
 {
     static const int removed[] = { 22, 30, 36 };
 
-    bool ok       = root && ( root->GetMapElementCount() == 37 );
+    bool ok       = root.GetMemberCount() == 37;
     int  position = 0;
     char name[ 16 ];
 
@@ -126,7 +128,7 @@ void CheckMembers( const Json::ObjectValue* root, double k5, double k25, const c
 
         double expected = ( a == 5 ) ? k5 : ( a == 25 ) ? k25 : a;
 
-        ok = ( strcmp( root->begin()[ position++ ]->name, name ) == 0 ) && root->FindNumber( name ) && ( *root->FindNumber( name ) == expected );
+        ok = ( root.begin()[ position++ ].GetName() == name ) && root.FindNumber( name ) && ( *root.FindNumber( name ) == expected );
     }
 
     Check( ok, description );
@@ -136,8 +138,8 @@ void TestRepeatedNames()
 {
     LargeObject object = MakeLargeObject();
 
-    Json::StructuredData sd;
-    Json::ParseResult    result = ParseText( sd, object.text );
+    V3::StructuredData sd;
+    Json::ParseResult  result = ParseText( sd, object.text );
 
     CheckStatus( result.status, Json::Status::kDuplicateName, "repeated names in a large object are rejected" );
     Check( ( result.errorLine == 1 ) && ( result.errorColumn == object.nameColumn[ 22 ] ), "the earliest repeat is reported" );
@@ -204,8 +206,8 @@ Terathon::String<> MakeMembers( const char* prefix, int count, const char* repea
 // Large objects inside large objects, each settling its own repeated names when it closes.
 void TestNestedLargeObjects()
 {
-    Json::StructuredData sd;
-    int                  repeatColumn = 0;
+    V3::StructuredData sd;
+    int                repeatColumn = 0;
 
     // The outer object repeats o0 after a large inner object.
     Terathon::String<> outer = MakeMembers( "o", 17, nullptr, nullptr, 0 );
@@ -234,13 +236,13 @@ void TestNestedLargeObjects()
     options.duplicateNames = Json::DuplicateNames::kKeepLast;
     CheckStatus( ParseText( sd, outer, options ).status, Json::Status::kOk, "keep the last of repeats in nested large objects" );
 
-    const Json::ObjectValue* root        = Root( sd );
-    const Json::ObjectValue* innerObject = root ? root->FindJsonObjectValue( "o18" ) : nullptr;
+    V3::ObjectView root        = Root( sd );
+    V3::ObjectView innerObject = root.FindObject( "o18" );
 
-    Check( root && ( root->GetMapElementCount() == 18 ) && root->FindNumber( "o1" ) && ( *root->FindNumber( "o1" ) == 17 ),
+    Check( ( root.GetMemberCount() == 18 ) && root.FindNumber( "o1" ) && ( *root.FindNumber( "o1" ) == 17 ),
            "the outer object keeps the last value of its repeat" );
-    Check( innerObject && ( innerObject->GetMapElementCount() == 20 ) && innerObject->FindNumber( "i3" ) && ( *innerObject->FindNumber( "i3" ) == 20 ) &&
-               innerObject->FindNumber( "i19" ),
+    Check( ( innerObject.GetMemberCount() == 20 ) && innerObject.FindNumber( "i3" ) && ( *innerObject.FindNumber( "i3" ) == 20 ) &&
+               innerObject.FindNumber( "i19" ),
            "the inner object keeps the last value of its repeat" );
 }
 
@@ -249,39 +251,33 @@ void TestBuiltByHand()
     const int count = 100;
     char      name[ 16 ];
 
-    Json::StructuredData sd;
+    V3::StructuredData sd;
     CheckStatus( ParseText( sd, "{}" ).status, Json::Status::kOk, "parse an empty object" );
 
-    Json::ObjectValue* root = sd.GetRootJsonValue()->AsJsonObjectValue();
+    const V3::Value& root   = *sd.GetRoot();
+    V3::ObjectView   object = root.AsObject();
 
     for ( int a = 0; a < count; a++ )
     {
         int key = ( a * 37 ) % count;
 
-        Json::Value* element = Json::Detail::CreateValueFor( double( key ) );
         snprintf( name, sizeof( name ), ( key % 3 == 0 ) ? "\xC3\xA9%d" : "m%d", key );
-        element->name = name;
-        Json::Serialize( element, double( key ) );
-
-        Check( root->InsertAccountedMapElement( element ), "insert a member by hand" );
+        CheckStatus( sd.AddMember( root, name, double( key ) ), Json::Status::kOk, "insert a member by hand" );
     }
 
-    bool found = root->GetMapElementCount() == count;
+    bool found = object.GetMemberCount() == Terathon::uint32( count );
 
     for ( int a = 0; a < count; a++ )
     {
         int key = ( a * 37 ) % count;
 
         snprintf( name, sizeof( name ), ( key % 3 == 0 ) ? "\xC3\xA9%d" : "m%d", key );
-        found = found && ( strcmp( root->begin()[ a ]->name, name ) == 0 ) && root->FindNumber( name ) && ( *root->FindNumber( name ) == key );
+        found = found && ( object.begin()[ a ].GetName() == name ) && object.FindNumber( name ) && ( *object.FindNumber( name ) == key );
     }
 
     Check( found, "members inserted by hand are found and keep their order" );
 
-    Json::Value* duplicate = Json::Detail::CreateValueFor( 0.0 );
-    duplicate->name        = "m50";
-    Check( !root->InsertAccountedMapElement( duplicate ), "a repeated name inserted by hand is refused" );
-    delete duplicate;
+    CheckStatus( sd.AddMember( root, "m50", 0.0 ), Json::Status::kDuplicateName, "a repeated name inserted by hand is refused" );
 
     for ( int key = 1; key < count; key += 3 )
     {
@@ -289,20 +285,20 @@ void TestBuiltByHand()
 
         if ( key % 2 )
         {
-            delete root->FindValue( name );
+            CheckStatus( sd.RemoveMember( root, name ), Json::Status::kOk, "remove a member by hand" );
         }
         else
         {
-            delete root->RemoveAccountedMapElement( name );
+            CheckStatus( sd.RemoveMember( root, name, Terathon::uint32( strlen( name ) ) ), Json::Status::kOk, "remove a member by hand with its length" );
         }
     }
 
-    found = root->GetMapElementCount() == count - 33;
+    found = object.GetMemberCount() == Terathon::uint32( count - 33 );
 
     for ( int key = 0; key < count; key++ )
     {
         snprintf( name, sizeof( name ), ( key % 3 == 0 ) ? "\xC3\xA9%d" : "m%d", key );
-        found = found && ( ( key % 3 == 1 ) ? !root->FindValue( name ) : ( root->FindNumber( name ) && ( *root->FindNumber( name ) == key ) ) );
+        found = found && ( ( key % 3 == 1 ) ? !object.Find( name ) : ( object.FindNumber( name ) && ( *object.FindNumber( name ) == key ) ) );
     }
 
     Check( found, "members removed by hand are gone and the others are still found" );

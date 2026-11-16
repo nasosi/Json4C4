@@ -1,5 +1,7 @@
 #include "TestCheck.h"
 
+namespace V3 = Json::V3;
+
 struct ConformanceCase
 {
     const char*  text;
@@ -52,7 +54,7 @@ const ConformanceCase conformanceCases[] = {
     CASE( "[.5]", kExpectedJsonValue ),
     CASE( "[Infinity]", kExpectedJsonValue ),
     CASE( "[NaN]", kExpectedJsonValue ),
-    CASE( "\"\\u0000\"", kStringIllegalEscape ),
+    CASE( "\"\\u0000\"", kOk ),
     CASE( "\"\\uD83D\"", kStringIllegalEscape ),
     CASE( "\"\\uDE00\"", kStringIllegalEscape ),
     CASE( "\"\\uDE00\\uD83D\"", kStringIllegalEscape ),
@@ -85,30 +87,30 @@ const ConformanceCase conformanceCases[] = {
     CASE( "", kTextBufferContentsInvalid ),
 };
 
-const double* RootNumber( const Json::StructuredData& sd )
+const double* RootNumber( const V3::StructuredData& sd )
 {
-    return sd.GetRootJsonValue() ? sd.GetRootJsonValue()->GetDataAsPointerTo<double>() : nullptr;
+    return sd.GetRoot() ? sd.GetRoot()->AsNumber() : nullptr;
 }
 
-const Terathon::String<>* RootString( const Json::StructuredData& sd )
+V3::StringView RootString( const V3::StructuredData& sd )
 {
-    return sd.GetRootJsonValue() ? sd.GetRootJsonValue()->GetDataAsPointerTo<Terathon::String<>>() : nullptr;
+    return sd.GetRoot() ? sd.GetRoot()->AsString() : V3::StringView();
 }
 
 int main()
 {
     for ( const ConformanceCase& conformanceCase : conformanceCases )
     {
-        Json::StructuredData sd;
+        V3::StructuredData sd;
 
         Json::ParseResult parseResult = ParseText( sd, conformanceCase.text, conformanceCase.length );
 
         CheckStatus( parseResult.status, conformanceCase.status, conformanceCase.text );
-        Check( ( parseResult.status == Json::Status::kOk ) == ( sd.GetRootJsonValue() != nullptr ), "a root exists only after a successful parse" );
+        Check( ( parseResult.status == Json::Status::kOk ) == ( sd.GetRoot() != nullptr ), "a root exists only after a successful parse" );
     }
 
     {
-        Json::StructuredData sd;
+        V3::StructuredData sd;
 
         ParseText( sd, "5" );
         Check( RootNumber( sd ) && *RootNumber( sd ) == 5.0, "single digit root" );
@@ -129,17 +131,20 @@ int main()
         Check( RootNumber( sd ) && *RootNumber( sd ) == 123456789012345678.0, "large integer" );
 
         ParseText( sd, "\"\\uD83D\\uDE00\"" );
-        Check( RootString( sd ) && strcmp( *RootString( sd ), "\xF0\x9F\x98\x80" ) == 0, "escaped surrogate pair becomes four byte UTF-8" );
-        Check( RootString( sd ) && RootString( sd )->GetStringLength() == 4, "escaped surrogate pair length" );
+        Check( RootString( sd ) == "\xF0\x9F\x98\x80", "escaped surrogate pair becomes four byte UTF-8" );
+        Check( RootString( sd ).GetLength() == 4, "escaped surrogate pair length" );
 
         ParseText( sd, "\"a\\u00e9\\u20AC\\uD834\\uDD1Eb\"" );
-        Check( RootString( sd ) && strcmp( *RootString( sd ),
-                                           "a\xC3\xA9\xE2\x82\xAC\xF0\x9D\x84\x9E"
-                                           "b" ) == 0,
+        Check( RootString( sd ) == "a\xC3\xA9\xE2\x82\xAC\xF0\x9D\x84\x9E"
+                                   "b",
                "mixed escapes" );
 
         ParseText( sd, "\"\x7F\"" );
-        Check( RootString( sd ) && strcmp( *RootString( sd ), "\x7F" ) == 0, "raw DEL" );
+        Check( RootString( sd ) == "\x7F", "raw DEL" );
+
+        ParseText( sd, "\"a\\u0000b\"" );
+        Check( ( RootString( sd ).GetLength() == 3 ) && ( RootString( sd ).GetText()[ 1 ] == 0 ) && ( RootString( sd ).GetText()[ 2 ] == 'b' ),
+               "an escaped zero is kept in the string" );
     }
 
     return TestResult();
