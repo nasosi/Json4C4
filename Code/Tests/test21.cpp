@@ -55,12 +55,15 @@ void operator delete[]( void* memory, size_t ) noexcept
     free( memory );
 }
 
-// Hands out blocks with malloc, can refuse one request, and checks that every block comes back once with its size.
+// Hands out blocks with malloc, can refuse one request or every block larger than a size, and checks that every block
+// comes back once with its size.
 class CountingSource final : public V3::BlockSource
 {
 public:
     int64_t requestCount     = 0;
     int64_t refusedRequest   = -1;
+    uint64  largestBlockSize = 0;
+    uint64  largestGranted   = 0;
     int64_t outstandingBytes = 0;
     bool    misused          = false;
 
@@ -71,10 +74,12 @@ public:
             misused = true;
         }
 
-        if ( requestCount++ == refusedRequest )
+        if ( ( requestCount++ == refusedRequest ) || ( ( largestBlockSize != 0 ) && ( size > largestBlockSize ) ) )
         {
             return nullptr;
         }
+
+        largestGranted = ( size > largestGranted ) ? size : largestGranted;
 
         void* block = malloc( size_t( size ) );
 
@@ -499,6 +504,20 @@ void TestViews()
     }
 
     Check( count == 15, "iterate over an array" );
+
+    const char* numbers   = "[1,-2,1.5,1e2,0,-0,1E2,1.0,-12345678901234567890,\"1\"]";
+    const bool  integer[] = { true, true, false, false, true, true, false, false, true, false };
+
+    CheckStatus( data.ParseText( numbers, strlen( numbers ) ).status, Json::Status::kOk, "parse numbers" );
+
+    bool integers = data.GetRoot() && ( data.GetRoot()->AsArray().GetElementCount() == 10 );
+
+    for ( uint32 a = 0; integers && ( a < 10 ); a++ )
+    {
+        integers = ( data.GetRoot()->AsArray()[ a ].IsInteger() == integer[ a ] );
+    }
+
+    Check( integers, "numbers written without a fraction or an exponent are integers" );
     Check( !V3::ArrayView() && ( V3::ArrayView().GetElementCount() == 0 ) && !V3::ObjectView().Find( "a" ) && !V3::StringView(), "empty views" );
     Check( ( V3::StringView( "ab", 2 ) == V3::StringView( "abc", 2 ) ) && ( V3::StringView( "ab", 2 ) != "abc" ) && ( V3::StringView( "ab", 2 ) != "a" ),
            "compare strings" );
@@ -567,7 +586,8 @@ void TestRefusedBlocks()
 
     text += "}";
 
-    int64_t requests;
+    int64_t               requests;
+    Terathon::Array<char> expected;
 
     {
         V3::StructuredData data( countingSource );
@@ -579,27 +599,86 @@ void TestRefusedBlocks()
         Check( requests >= 4, "the document and the stack grow" );
         Check( countingSource.outstandingBytes > 0, "the document keeps its blocks" );
 
+        data.Write( expected );
         data.Clear();
         Check( countingSource.AllReturned() && !data.GetRoot(), "Clear hands every block back" );
     }
 
-    bool failedClosed = true;
+    // A refused block the document only wanted to grow is asked for again at a smaller size, so the parse may succeed.
+    bool    closed    = true;
+    int64_t failed    = 0;
+    int64_t recovered = 0;
 
     for ( int64_t refused = 0; refused < requests; refused++ )
     {
-        V3::StructuredData data( countingSource );
+        Json::Status status;
 
-        countingSource.requestCount   = 0;
-        countingSource.refusedRequest = refused;
+        {
+            V3::StructuredData data( countingSource );
 
-        Json::ParseResult result = data.ParseText( text, uint64( text.GetStringLength() ) );
+            countingSource.requestCount   = 0;
+            countingSource.refusedRequest = refused;
 
-        failedClosed = failedClosed && ( result.status == Json::Status::kAllocationRefused ) && !data.GetRoot() && countingSource.AllReturned();
+            status = data.ParseText( text, uint64( text.GetStringLength() ) ).status;
+
+            if ( status == Json::Status::kOk )
+            {
+                Terathon::Array<char> written;
+                data.Write( written );
+
+                closed = closed && SameText( written, expected );
+                recovered++;
+            }
+            else
+            {
+                closed = closed && ( status == Json::Status::kAllocationRefused ) && !data.GetRoot() && ( countingSource.outstandingBytes == 0 );
+                failed++;
+            }
+        }
+
+        closed = closed && countingSource.AllReturned();
     }
 
     countingSource.refusedRequest = -1;
 
-    Check( failedClosed, "every refused request fails the parse and leaves no block" );
+    Check( closed, "a refused request fails the parse and leaves no block, or is asked for again at a smaller size" );
+    Check( ( failed > 0 ) && ( recovered > 0 ), "some refused requests fail the parse and others are asked for again" );
+
+    // Blocks of no more than 16 KiB hold a document of about 240 KB.
+    Terathon::String<> arrays = "[";
+
+    for ( int a = 0; a < 300; a++ )
+    {
+        arrays += ( a != 0 ) ? ",[" : "[";
+
+        for ( int b = 0; b < 50; b++ )
+        {
+            snprintf( member, sizeof( member ), "%s%d", ( b != 0 ) ? "," : "", b );
+            arrays += member;
+        }
+
+        arrays += "]";
+    }
+
+    arrays += "]";
+
+    countingSource.largestBlockSize = 16384;
+    countingSource.largestGranted   = 0;
+
+    {
+        V3::StructuredData data( countingSource );
+
+        CheckStatus( data.ParseText( arrays, uint64( arrays.GetStringLength() ) ).status, Json::Status::kOk, "parse into small blocks" );
+        Check( ( countingSource.largestGranted <= 16384 ) && data.GetRoot() && ( data.GetRoot()->AsArray().GetElementCount() == 300 ) &&
+                   ( *data.GetRoot()->AsArray()[ 299 ].AsArray()[ 49 ].AsNumber() == 49 ),
+               "a source that refuses large blocks gets smaller ones" );
+
+        CheckStatus( data.ParseText( text, uint64( text.GetStringLength() ) ).status, Json::Status::kAllocationRefused, "an array larger than any block" );
+    }
+
+    countingSource.largestBlockSize = 0;
+
+    Check( countingSource.AllReturned(), "small blocks are all handed back" );
 
     {
         V3::StructuredData data( countingSource );

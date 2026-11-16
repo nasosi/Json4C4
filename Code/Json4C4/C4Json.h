@@ -1681,7 +1681,10 @@ namespace C4
         namespace V3
         {
             // Gives a document its memory. AllocateBlock returns size bytes aligned to 8 bytes, or nullptr to refuse
-            // them, and FreeBlock takes a block back with the size it was allocated with. Sizes are multiples of 8.
+            // them, and FreeBlock takes a block back with the size it was allocated with. Sizes are multiples of 8. A
+            // refused block that the document only wanted to grow is asked for again at smaller sizes, down to what the
+            // request needs. A source is called only from the thread that uses the document, and it must outlive the
+            // document.
             class BlockSource
             {
             public:
@@ -1779,6 +1782,12 @@ namespace C4
                     return type == Type::kNull;
                 }
 
+                // A number written without a fraction or an exponent.
+                bool IsInteger() const noexcept
+                {
+                    return ( type == Type::kNumber ) && integer;
+                }
+
                 const bool* AsBool() const noexcept
                 {
                     return ( type == Type::kBool ) ? &data.boolean : nullptr;
@@ -1807,9 +1816,10 @@ namespace C4
                     const Member* members;
                 };
 
-                Type   type  = Type::kNull;
-                uint32 count = 0;
-                Data   data  = {};
+                Type   type    = Type::kNull;
+                bool   integer = false;
+                uint32 count   = 0;
+                Data   data    = {};
             };
 
             class Member
@@ -1965,7 +1975,7 @@ namespace C4
             }
 
             // A document. Everything it holds lives in blocks from its block source, which it hands back when it is
-            // cleared, parsed again or destroyed.
+            // cleared, parsed again or destroyed. Values, strings and views taken from it are valid until then.
             class StructuredData
             {
                 friend class DocumentParser;

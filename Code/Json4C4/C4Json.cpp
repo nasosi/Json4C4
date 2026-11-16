@@ -2581,6 +2581,19 @@ namespace C4
                 return SameName( first.GetText(), first.GetLength(), second.GetText(), second.GetLength() );
             }
 
+            // Whether the text of a number, which ends at stop, has neither a fraction nor an exponent.
+            inline bool IsIntegerText( const char* text, const char* stop ) noexcept
+            {
+                text += ( text != stop ) && ( text[ 0 ] == '-' );
+
+                while ( ( text != stop ) && IsDigit( uint8( text[ 0 ] ) ) )
+                {
+                    text++;
+                }
+
+                return text == stop;
+            }
+
             // Orders names by their bytes, read as unsigned values, and a name before the longer names it begins.
             int32 CompareNames( const char* first, uint32 firstLength, const char* second, uint32 secondLength ) noexcept
             {
@@ -2736,13 +2749,19 @@ namespace C4
             }
 
             // A request larger than half the next block gets a block of its own, and the current block keeps its free
-            // space.
+            // space. When the source refuses a block, smaller ones are asked for, and blocks stop growing.
             void* StructuredData::AllocateInNewBlock( uint64 size, bool aligned ) noexcept
             {
                 uint64 ownSize   = sizeof( Block ) + RoundUpToEight( size );
-                bool   own       = ownSize > nextBlockSize / 2;
-                uint64 blockSize = own ? ownSize : nextBlockSize;
+                uint64 blockSize = ( ownSize > nextBlockSize / 2 ) ? ownSize : nextBlockSize;
                 Block* block     = static_cast<Block*>( blockSource->AllocateBlock( blockSize ) );
+                bool   refused   = !block;
+
+                while ( !block && ( blockSize > ownSize ) )
+                {
+                    blockSize = ( blockSize / 2 > ownSize ) ? RoundUpToEight( blockSize / 2 ) : ownSize;
+                    block     = static_cast<Block*>( blockSource->AllocateBlock( blockSize ) );
+                }
 
                 if ( !block )
                 {
@@ -2755,14 +2774,23 @@ namespace C4
 
                 char* memory = reinterpret_cast<char*>( block + 1 );
 
-                if ( own )
+                if ( refused )
+                {
+                    nextBlockSize = ( blockSize > smallestBlockSize ) ? blockSize : smallestBlockSize;
+                }
+
+                if ( blockSize == ownSize )
                 {
                     return memory;
                 }
 
-                blockTop      = memory;
-                blockEnd      = reinterpret_cast<char*>( block ) + blockSize;
-                nextBlockSize = ( nextBlockSize < largestGrowingBlockSize ) ? nextBlockSize * 2 : nextBlockSize;
+                blockTop = memory;
+                blockEnd = reinterpret_cast<char*>( block ) + blockSize;
+
+                if ( !refused && ( nextBlockSize < largestGrowingBlockSize ) )
+                {
+                    nextBlockSize *= 2;
+                }
 
                 return aligned ? AllocateAligned( size ) : AllocateBytes( size );
             }
@@ -2810,14 +2838,22 @@ namespace C4
                         return true;
                     }
 
-                    uint64 grown = ( capacity != 0 ) ? capacity * 2 : smallestStackSize;
+                    uint64 needed = RoundUpToEight( size + extra );
+                    uint64 grown  = ( capacity != 0 ) ? capacity * 2 : smallestStackSize;
 
-                    while ( grown - size < extra )
+                    while ( grown < needed )
                     {
                         grown *= 2;
                     }
 
                     char* block = static_cast<char*>( blockSource.AllocateBlock( grown ) );
+
+                    while ( !block && ( grown > needed ) )
+                    {
+                        grown = ( grown / 2 > needed ) ? RoundUpToEight( grown / 2 ) : needed;
+                        block = static_cast<char*>( blockSource.AllocateBlock( grown ) );
+                    }
+
                     if ( !block )
                     {
                         return false;
@@ -2920,8 +2956,15 @@ namespace C4
                             return ParseObject( value, text, depth + 1 );
 
                         default:
-                            value.type = Type::kNumber;
-                            return ReadNumber( value.data.number, text );
+                        {
+                            const char* number = text;
+
+                            status        = ReadNumber( value.data.number, text );
+                            value.type    = Type::kNumber;
+                            value.integer = IsIntegerText( number, text );
+
+                            return status;
+                        }
                     }
                 }
 
