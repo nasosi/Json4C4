@@ -97,11 +97,12 @@
 
 #ifndef JSON4C4_MAX_FILE_SIZE
 
-#    define JSON4C4_MAX_FILE_SIZE 0x7FFFFFFE
+#    define JSON4C4_MAX_FILE_SIZE 0x7FFFFF00
 
 #endif
 
-static_assert( JSON4C4_MAX_FILE_SIZE <= 0x7FFFFFFE, "JSON4C4_MAX_FILE_SIZE must leave room for the 32-bit lengths and columns of a text" );
+static_assert( ( JSON4C4_MAX_FILE_SIZE > 0 ) && ( JSON4C4_MAX_FILE_SIZE <= 0x7FFFFF00 ),
+               "JSON4C4_MAX_FILE_SIZE must be positive and leave room for the 32-bit sizes of a text and its strings" );
 
 namespace C4
 {

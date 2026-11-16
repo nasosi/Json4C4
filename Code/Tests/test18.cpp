@@ -198,7 +198,7 @@ void TestEdges()
     CheckStatus( sd.ParseText( nullptr, 5 ).status, Json::Status::kTextBufferContentsInvalid, "no text" );
     Check( sd.GetRootJsonValue() == nullptr, "a failed parse clears the previous document" );
     CheckStatus( sd.ParseText( "[1]", 0 ).status, Json::Status::kTextBufferContentsInvalid, "an empty text" );
-    CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x7FFFFFFFU ) ).status, Json::Status::kFileTooLarge, "a text one byte longer than the limit" );
+    CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x7FFFFF01U ) ).status, Json::Status::kFileTooLarge, "a text one byte longer than the limit" );
     CheckStatus( sd.ParseText( "[1]", Terathon::uint64( 0x80000000U ) ).status, Json::Status::kFileTooLarge, "a text longer than the limit" );
     CheckStatus( sd.ParseText( "[1]", ~Terathon::uint64( 0 ) ).status, Json::Status::kFileTooLarge, "the longest length" );
 

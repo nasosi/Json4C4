@@ -115,6 +115,7 @@ Numbers are read correctly rounded and written in the shortest form that reads b
 * Objects with more than 16 members find names through a sorted index instead of a hash, so no choice of names can make parsing or finding a member slow. In such an object a repeated name is found once the whole object has been read, so any error later in the same object, one inside a nested value included, is reported instead of ```kDuplicateName```.
 * MSVC builds without exceptions contain no ```try``` or ```catch```.
 * ```ParseOptions``` is larger, so code built against the 2.2 header must be rebuilt to use a 2.3 shared library.
+* ```JSON4C4_MAX_FILE_SIZE``` is 0x7FFFFF00 by default and can no longer be defined higher, so that the size of every string of a text fits in 32 bits.
 
 ### Version 2.2.1
 * Numbers are converted with the NumberTextThree header, which replaces NumberText. Inside the C4 Engine, copy ```NumberTextThree.h``` from ```Code/NumberTextThree``` instead of ```NumberText.h```. Numbers are read faster, and read and write exactly as before.
@@ -208,7 +209,7 @@ The default for ```ParseOptions::maxNestingDepth```, 256 unless defined otherwis
 The defaults for ```ParseOptions::maxValueCount``` and ```ParseOptions::maxStringByteCount```, no limit (0x7FFFFFFFFFFFFFFF) unless defined otherwise.
 
 ### ```JSON4C4_MAX_FILE_SIZE```
-The largest file or text ```Parse``` and ```ParseText``` read and ```Write``` produces, 0x7FFFFFFE bytes unless defined lower. A longer text fails with ```Status::kFileTooLarge```.
+The largest file or text ```Parse``` and ```ParseText``` read and ```Write``` produces, 0x7FFFFF00 bytes unless defined lower. A longer text fails with ```Status::kFileTooLarge```.
 
 ## Third party licenses
 Third-party licenses are located in the ```Licenses``` subfolder.
