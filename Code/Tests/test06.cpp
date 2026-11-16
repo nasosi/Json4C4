@@ -2,7 +2,7 @@
 
 int main()
 {
-    constexpr unsigned statusCount = unsigned( Json::Status::kFileWriteError ) + 1;
+    constexpr unsigned statusCount = unsigned( Json::Status::kMaximumStringByteCountExceeded ) + 1;
 
     for ( unsigned a = 0; a < statusCount; a++ )
     {
@@ -20,6 +20,10 @@ int main()
     Check( strcmp( Json::StatusToString( Json::Status::kStringIllegalEscape ), "Illegal escape" ) == 0, "kStringIllegalEscape string" );
     Check( strcmp( Json::StatusToString( Json::Status::kNameNotPresent ), "Could not find requested name of name/value pair" ) == 0, "kNameNotPresent string" );
     Check( strcmp( Json::StatusToString( Json::Status::kFileWriteError ), "Could not write file" ) == 0, "kFileWriteError string" );
+    Check( strcmp( Json::StatusToString( Json::Status::kMaximumValueCountExceeded ), "Maximum value count exceeded" ) == 0,
+           "kMaximumValueCountExceeded string" );
+    Check( strcmp( Json::StatusToString( Json::Status::kMaximumStringByteCountExceeded ), "Maximum string byte count exceeded" ) == 0,
+           "kMaximumStringByteCountExceeded string" );
     Check( strcmp( Json::StatusToString( Json::Status( statusCount ) ), "Unknown status" ) == 0, "out of range status" );
     Check( strcmp( Json::StatusToString( Json::Status( 0xFFFFFFFF ) ), "Unknown status" ) == 0, "large out of range status" );
 

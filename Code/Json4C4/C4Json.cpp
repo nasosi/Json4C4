@@ -602,11 +602,13 @@ namespace C4
                                                     "Could not find requested name of name/value pair",
                                                     "Maximum nesting depth exceeded",
                                                     "Duplicate name in object",
-                                                    "Could not write file" };
+                                                    "Could not write file",
+                                                    "Maximum value count exceeded",
+                                                    "Maximum string byte count exceeded" };
 
         constexpr unsigned int statusStringCount = sizeof( StatusString ) / sizeof( StatusString[ 0 ] );
 
-        static_assert( statusStringCount == (unsigned int)( Status::kFileWriteError ) + 1, "StatusString must have one entry per Status" );
+        static_assert( statusStringCount == (unsigned int)( Status::kMaximumStringByteCountExceeded ) + 1, "StatusString must have one entry per Status" );
 
         TERATHON_API String<256> StatusToString( const Status& status ) noexcept
         {
@@ -693,6 +695,20 @@ namespace C4
             return ( ( c == 0xEDU ) && ( byte[ 1 ] >= 0xA0U ) ) ? 0 : length;
         }
 
+        // A character that may run into the end of the text is read from a copy followed by zeros.
+        inline int32 GetPlainCharLength( const uint8* byte, const uint8* end ) noexcept
+        {
+            if ( end - byte >= 4 )
+            {
+                return GetPlainCharLength( byte );
+            }
+
+            char tail[ 4 ] = {};
+            CopyText( tail, reinterpret_cast<const char*>( byte ), int32( end - byte ) );
+
+            return GetPlainCharLength( reinterpret_cast<const uint8*>( tail ) );
+        }
+
         Status AppendEscapedString( Array<char>& output, const char* text )
         {
             static const char hexadecimalDigit[] = "0123456789abcdef";
@@ -762,16 +778,9 @@ namespace C4
             return ( status == Status::kOk ) ? AppendText( output, "\"", 1 ) : status;
         }
 
-        int32 ComputeWhitespaceLength( const char* text ) noexcept
+        inline bool IsWhitespace( uint32 c ) noexcept
         {
-            const uint8* byte = reinterpret_cast<const uint8*>( text );
-
-            while ( byte[ 0 ] != 0 && ( byte[ 0 ] == space || byte[ 0 ] == tab || byte[ 0 ] == newLine || byte[ 0 ] == carriageReturn ) )
-            {
-                byte++;
-            }
-
-            return int32( reinterpret_cast<const char*>( byte ) - text );
+            return ( c == space ) || ( c == tab ) || ( c == newLine ) || ( c == carriageReturn );
         }
 
         inline bool IsDigit( uint32 c ) noexcept
@@ -898,112 +907,6 @@ namespace C4
             }
 
             return ( textLength );
-        }
-
-        Status ReadStringLiteral( const char* text, int32* textLength, int32* stringLength, char* restrict string = nullptr ) noexcept
-        {
-            const uint8* byte   = reinterpret_cast<const uint8*>( text );
-            int32        count  = 0;
-            Status       status = Status::kOk;
-
-            for ( ;; )
-            {
-                const uint8* run = byte;
-
-                while ( int32 length = GetPlainCharLength( byte ) )
-                {
-                    byte += length;
-                }
-
-                int32 runLength = int32( byte - run );
-
-                if ( string )
-                {
-                    CopyText( string, reinterpret_cast<const char*>( run ), runLength );
-                    string += runLength;
-                }
-
-                count += runLength;
-
-                uint32 c = byte[ 0 ];
-
-                if ( c != '\\' )
-                {
-                    if ( c != '\"' )
-                    {
-                        status = ( c == 0 ) ? Status::kPrematureNullTerminator : Status::kStringIllegalChar;
-                    }
-
-                    break;
-                }
-
-                int32 stringLen;
-
-                int32 textLen = ReadStringEscapeChar( reinterpret_cast<const char*>( byte + 1 ), &stringLen, string );
-                if ( textLen == 0 )
-                {
-                    status = Status::kStringIllegalEscape;
-                    break;
-                }
-
-                if ( string )
-                {
-                    string += stringLen;
-                }
-
-                byte += textLen + 1;
-                count += stringLen;
-            }
-
-            *textLength   = int32( reinterpret_cast<const char*>( byte ) - text );
-            *stringLength = count;
-
-            return ( status );
-        }
-
-        Status ParseStringLiteral( String<>& string, const char*& text ) noexcept
-        {
-            if ( text[ 0 ] != '"' )
-            {
-                return ( Status::kExpectedBeginingDoubleQuotes );
-            }
-
-            int32 textLength;
-            int32 stringLength;
-
-            text++;
-
-            Status status = ReadStringLiteral( text, &textLength, &stringLength );
-            if ( status != Status::kOk )
-            {
-                text += textLength;
-                return ( status );
-            }
-
-            status = MayThrow(
-                [ & ]()
-                {
-                    string.SetStringLength( stringLength );
-                    return Status::kOk;
-                } );
-
-            if ( status != Status::kOk )
-            {
-                return status;
-            }
-
-            if ( stringLength == textLength )
-            {
-                CopyText( string, text, stringLength );
-            }
-            else
-            {
-                ReadStringLiteral( text, &textLength, &stringLength, string );
-            }
-
-            text += textLength + 1;
-
-            return ( Status::kOk );
         }
 
         class StringValue final : public Value
@@ -1140,16 +1043,80 @@ namespace C4
 
         } // namespace Detail
 
+        // Objects with more members than this find a name through an index of member positions sorted by name, smaller
+        // ones by comparing every name.
+        constexpr int32 indexedMemberCount = 16;
+
+        // Orders names by their bytes, read as unsigned values.
+        int32 CompareNames( const char* first, const char* second ) noexcept
+        {
+            const uint8* a = reinterpret_cast<const uint8*>( first );
+            const uint8* b = reinterpret_cast<const uint8*>( second );
+
+            while ( ( a[ 0 ] == b[ 0 ] ) && ( a[ 0 ] != 0 ) )
+            {
+                a++;
+                b++;
+            }
+
+            return int32( a[ 0 ] ) - int32( b[ 0 ] );
+        }
+
+        // How far back from the end the parser looks for a character that ends every string run.
+        constexpr int32 stringStopSearchLength = 4096;
+
         class Parser
         {
         public:
-            Parser( const char* textEnd, const ParseOptions& parseOptions ) noexcept : end( textEnd ), options( parseOptions )
+            // Runs of whitespace and of string characters test the end of the text only once. Everything from spaceStop
+            // on is whitespace, so a whitespace run that starts before it stops there at the latest. stringStop follows a
+            // quote, a backslash or a control character, none of which a string run passes or a UTF-8 character
+            // spans, so a string run that starts before it stops there at the latest.
+            Parser( const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
+                end( textEnd ),
+                spaceStop( textEnd ),
+                stringStop( begin ),
+                options( parseOptions ),
+                valuesLeft( parseOptions.maxValueCount ),
+                stringBytesLeft( parseOptions.maxStringByteCount )
             {
+                while ( ( spaceStop != begin ) && IsWhitespace( uint8( spaceStop[ -1 ] ) ) )
+                {
+                    spaceStop--;
+                }
+
+                const char* searchStart = ( end - begin > stringStopSearchLength ) ? end - stringStopSearchLength : begin;
+
+                for ( const char* c = end; c != searchStart; c-- )
+                {
+                    uint32 byte = uint8( c[ -1 ] );
+
+                    if ( ( byte == '"' ) || ( byte == '\\' ) || ( byte < 0x20U ) )
+                    {
+                        stringStop = c;
+                        break;
+                    }
+                }
             }
 
-            Status ParseValue( Value*& value, const char*& text, int32 depth ) const noexcept
+            const char* SkipWhitespace( const char* text ) const noexcept
             {
-                switch ( text[ 0 ] )
+                if ( text >= spaceStop )
+                {
+                    return end;
+                }
+
+                while ( IsWhitespace( uint8( text[ 0 ] ) ) )
+                {
+                    text++;
+                }
+
+                return text;
+            }
+
+            Status ParseValue( Value*& value, const char*& text, int32 depth ) noexcept
+            {
+                switch ( Peek( text ) )
                 {
                     case '"':
                         return ParseNew<StringValue>( value, text, depth );
@@ -1187,11 +1154,173 @@ namespace C4
 
         private:
             const char*         end;
+            const char*         spaceStop;
+            const char*         stringStop;
             const ParseOptions& options;
+            int64               valuesLeft;
+            int64               stringBytesLeft;
+
+            // Where the names of the objects being parsed begin, for each member past their first indexedMemberCount.
+            Array<const char*> nameStarts;
+
+            Array<ObjectValue::NamedPosition> sortedNames;
+            Array<ObjectValue::NamedPosition> sortScratch;
+
+            uint32 Peek( const char* text ) const noexcept
+            {
+                return ( text != end ) ? uint8( text[ 0 ] ) : 0;
+            }
+
+            Status ReadStringLiteral( const char* text, int32* textLength, int32* stringLength, char* restrict string = nullptr ) const noexcept
+            {
+                const uint8* byte    = reinterpret_cast<const uint8*>( text );
+                const uint8* byteEnd = reinterpret_cast<const uint8*>( end );
+                const uint8* stop    = reinterpret_cast<const uint8*>( stringStop );
+                int32        count   = 0;
+                Status       status  = Status::kOk;
+
+                for ( ;; )
+                {
+                    const uint8* run = byte;
+
+                    if ( byte < stop )
+                    {
+                        while ( int32 length = GetPlainCharLength( byte ) )
+                        {
+                            byte += length;
+                        }
+                    }
+                    else
+                    {
+                        while ( int32 length = GetPlainCharLength( byte, byteEnd ) )
+                        {
+                            byte += length;
+                        }
+                    }
+
+                    int32 runLength = int32( byte - run );
+
+                    if ( string )
+                    {
+                        CopyText( string, reinterpret_cast<const char*>( run ), runLength );
+                        string += runLength;
+                    }
+
+                    count += runLength;
+
+                    uint32 c = ( byte != byteEnd ) ? byte[ 0 ] : 0;
+
+                    if ( c != '\\' )
+                    {
+                        if ( c != '\"' )
+                        {
+                            status = ( c == 0 ) ? Status::kPrematureNullTerminator : Status::kStringIllegalChar;
+                        }
+
+                        break;
+                    }
+
+                    // The longest escape, a surrogate pair, is 11 characters after the backslash.
+                    const char* escape = reinterpret_cast<const char*>( byte + 1 );
+                    char        tail[ 11 ];
+
+                    if ( byteEnd - byte < 12 )
+                    {
+                        int32 left = int32( byteEnd - byte - 1 );
+
+                        for ( int32 a = 0; a < 11; a++ )
+                        {
+                            tail[ a ] = ( a < left ) ? escape[ a ] : 0;
+                        }
+
+                        escape = tail;
+                    }
+
+                    int32 stringLen;
+
+                    int32 textLen = ReadStringEscapeChar( escape, &stringLen, string );
+                    if ( textLen == 0 )
+                    {
+                        status = Status::kStringIllegalEscape;
+                        break;
+                    }
+
+                    if ( string )
+                    {
+                        string += stringLen;
+                    }
+
+                    byte += textLen + 1;
+                    count += stringLen;
+                }
+
+                *textLength   = int32( reinterpret_cast<const char*>( byte ) - text );
+                *stringLength = count;
+
+                return ( status );
+            }
+
+            Status ParseString( String<>& string, const char*& text ) noexcept
+            {
+                if ( Peek( text ) != '"' )
+                {
+                    return ( Status::kExpectedBeginingDoubleQuotes );
+                }
+
+                int32 textLength;
+                int32 stringLength;
+
+                Status status = ReadStringLiteral( text + 1, &textLength, &stringLength );
+                if ( status != Status::kOk )
+                {
+                    text += textLength + 1;
+                    return ( status );
+                }
+
+                if ( stringLength > stringBytesLeft )
+                {
+                    return Status::kMaximumStringByteCountExceeded;
+                }
+
+                stringBytesLeft -= stringLength;
+                text++;
+
+                status = MayThrow(
+                    [ & ]()
+                    {
+                        string.SetStringLength( stringLength );
+                        return Status::kOk;
+                    } );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                if ( stringLength == textLength )
+                {
+                    CopyText( string, text, stringLength );
+                }
+                else
+                {
+                    ReadStringLiteral( text, &textLength, &stringLength, string );
+                }
+
+                text += textLength + 1;
+
+                return ( Status::kOk );
+            }
 
             template <class T>
-            Status ParseNew( Value*& value, const char*& text, int32 depth ) const noexcept
+            Status ParseNew( Value*& value, const char*& text, int32 depth ) noexcept
             {
+                if ( valuesLeft == 0 )
+                {
+                    return Status::kMaximumValueCountExceeded;
+                }
+
+                valuesLeft--;
+
                 T* newValue = nullptr;
 
                 Status status = MayThrow(
@@ -1217,9 +1346,9 @@ namespace C4
                 return status;
             }
 
-            Status Parse( StringValue* value, const char*& text, int32 ) const noexcept
+            Status Parse( StringValue* value, const char*& text, int32 ) noexcept
             {
-                return ParseStringLiteral( value->data, text );
+                return ParseString( value->data, text );
             }
 
             Status Parse( NumberValue* value, const char*& text, int32 ) const noexcept
@@ -1230,7 +1359,7 @@ namespace C4
                 // invalid number NumberTextThree stops at a digit is one with a leading zero.
                 if ( ntt_parse_json_f64( text, end, &value->data, &stop ) == NUMBERTEXTTHREE_INVALID )
                 {
-                    return IsDigit( uint8( stop[ 0 ] ) ) ? Status::kNumbersCannotHaveLeadingZeros : Status::kFloatInvalid;
+                    return IsDigit( Peek( stop ) ) ? Status::kNumbersCannotHaveLeadingZeros : Status::kFloatInvalid;
                 }
 
                 text = stop;
@@ -1240,7 +1369,7 @@ namespace C4
 
             Status Parse( BoolValue* value, const char*& text, int32 ) const noexcept
             {
-                if ( text[ 0 ] == 't' && text[ 1 ] == 'r' && text[ 2 ] == 'u' && text[ 3 ] == 'e' )
+                if ( end - text >= 4 && text[ 0 ] == 't' && text[ 1 ] == 'r' && text[ 2 ] == 'u' && text[ 3 ] == 'e' )
                 {
                     value->data = true;
                     text += 4;
@@ -1248,7 +1377,7 @@ namespace C4
                     return Status::kOk;
                 }
 
-                if ( text[ 0 ] == 'f' && text[ 1 ] == 'a' && text[ 2 ] == 'l' && text[ 3 ] == 's' && text[ 4 ] == 'e' )
+                if ( end - text >= 5 && text[ 0 ] == 'f' && text[ 1 ] == 'a' && text[ 2 ] == 'l' && text[ 3 ] == 's' && text[ 4 ] == 'e' )
                 {
                     value->data = false;
                     text += 5;
@@ -1261,7 +1390,7 @@ namespace C4
 
             Status Parse( NullValue*, const char*& text, int32 ) const noexcept
             {
-                if ( text[ 0 ] == 'n' && text[ 1 ] == 'u' && text[ 2 ] == 'l' && text[ 3 ] == 'l' )
+                if ( end - text >= 4 && text[ 0 ] == 'n' && text[ 1 ] == 'u' && text[ 2 ] == 'l' && text[ 3 ] == 'l' )
                 {
                     text += 4;
 
@@ -1271,16 +1400,16 @@ namespace C4
                 return Status::kExpectedNull;
             }
 
-            Status Parse( ArrayValue* array, const char*& text, int32 depth ) const noexcept
+            Status Parse( ArrayValue* array, const char*& text, int32 depth ) noexcept
             {
                 bool emptyArray = true;
 
                 for ( ;; )
                 {
                     text++;
-                    text += ComputeWhitespaceLength( text );
+                    text = SkipWhitespace( text );
 
-                    if ( text[ 0 ] == ']' )
+                    if ( Peek( text ) == ']' )
                     {
                         if ( !emptyArray )
                         {
@@ -1314,15 +1443,15 @@ namespace C4
 
                     emptyArray = false;
 
-                    text += ComputeWhitespaceLength( text );
+                    text = SkipWhitespace( text );
 
-                    if ( text[ 0 ] != ',' )
+                    if ( Peek( text ) != ',' )
                     {
                         break;
                     }
                 }
 
-                if ( text[ 0 ] != ']' )
+                if ( Peek( text ) != ']' )
                 {
                     return Status::kExpectedClosingSquareBracketsOrComma;
                 }
@@ -1332,16 +1461,31 @@ namespace C4
                 return Status::kOk;
             }
 
-            Status Parse( ObjectValue* object, const char*& text, int32 depth ) const noexcept
+            Status Parse( ObjectValue* object, const char*& text, int32 depth ) noexcept
+            {
+                int32  nameBase = nameStarts.GetArrayElementCount();
+                Status status   = ParseMembers( object, text, depth );
+
+                if ( ( status == Status::kOk ) && ( object->members.GetArrayElementCount() > indexedMemberCount ) )
+                {
+                    status = IndexMembers( object, text, nameBase );
+                }
+
+                nameStarts.SetArrayElementCount( nameBase );
+
+                return status;
+            }
+
+            Status ParseMembers( ObjectValue* object, const char*& text, int32 depth ) noexcept
             {
                 bool emptyObject = true;
 
                 for ( ;; )
                 {
                     text++;
-                    text += ComputeWhitespaceLength( text );
+                    text = SkipWhitespace( text );
 
-                    if ( text[ 0 ] == '}' )
+                    if ( Peek( text ) == '}' )
                     {
                         if ( !emptyObject )
                         {
@@ -1356,21 +1500,21 @@ namespace C4
                     const char* nameStart = text;
 
                     String<> name;
-                    Status   status = ParseStringLiteral( name, text );
+                    Status   status = ParseString( name, text );
                     if ( status != Status::kOk )
                     {
                         return status;
                     }
 
-                    text += ComputeWhitespaceLength( text );
+                    text = SkipWhitespace( text );
 
-                    if ( text[ 0 ] != ':' )
+                    if ( Peek( text ) != ':' )
                     {
                         return Status::kExpectedColon;
                     }
 
                     text++;
-                    text += ComputeWhitespaceLength( text );
+                    text = SkipWhitespace( text );
 
                     Value* member = nullptr;
 
@@ -1382,14 +1526,21 @@ namespace C4
 
                     member->name = static_cast<String<>&&>( name );
 
-                    int32 position = object->FindMemberPosition( member->name );
+                    // Past the first members, IndexMembers finds the duplicate names once the object ends.
+                    bool  indexed  = object->members.GetArrayElementCount() >= indexedMemberCount;
+                    int32 position = indexed ? -1 : object->FindMemberPosition( member->name );
 
                     if ( position < 0 )
                     {
                         status = MayThrow(
                             [ & ]()
                             {
-                                object->AppendMember( member );
+                                if ( indexed )
+                                {
+                                    nameStarts.AppendArrayElement( nameStart );
+                                }
+
+                                object->members.AppendArrayElement( member );
                                 return Status::kOk;
                             } );
 
@@ -1398,6 +1549,8 @@ namespace C4
                             delete member;
                             return status;
                         }
+
+                        member->owner = object;
                     }
                     else if ( options.duplicateNames == DuplicateNames::kKeepLast )
                     {
@@ -1416,15 +1569,15 @@ namespace C4
 
                     emptyObject = false;
 
-                    text += ComputeWhitespaceLength( text );
+                    text = SkipWhitespace( text );
 
-                    if ( text[ 0 ] != ',' )
+                    if ( Peek( text ) != ',' )
                     {
                         break;
                     }
                 }
 
-                if ( text[ 0 ] != '}' )
+                if ( Peek( text ) != '}' )
                 {
                     return Status::kExpectedClosingCurlyBracesOrComma;
                 }
@@ -1432,6 +1585,96 @@ namespace C4
                 text++;
 
                 return Status::kOk;
+            }
+
+            // Sorts the members of a large object by name and settles the duplicate names among them. With kReject, the
+            // duplicate reported is the earliest member whose name came before, as if each member were checked when read.
+            Status IndexMembers( ObjectValue* object, const char*& text, int32 nameBase ) noexcept
+            {
+                Status status = MayThrow(
+                    [ & ]()
+                    {
+                        object->BuildMemberIndex( sortedNames, sortScratch );
+                        return Status::kOk;
+                    } );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                Array<Value*, 8>&                 members = object->members;
+                const ObjectValue::NamedPosition* sorted  = sortedNames.begin();
+                int32                             count   = members.GetArrayElementCount();
+                int32                             repeat  = count;
+                bool                              removed = false;
+
+                for ( int32 first = 0, next = 1; first < count; first = next++ )
+                {
+                    while ( ( next < count ) && ( CompareNames( sorted[ next ].name, sorted[ first ].name ) == 0 ) )
+                    {
+                        next++;
+                    }
+
+                    if ( next - first == 1 )
+                    {
+                        continue;
+                    }
+
+                    if ( options.duplicateNames == DuplicateNames::kReject )
+                    {
+                        repeat = ( sorted[ first + 1 ].position < repeat ) ? sorted[ first + 1 ].position : repeat;
+                        continue;
+                    }
+
+                    Value* kept = members[ sorted[ ( options.duplicateNames == DuplicateNames::kKeepLast ) ? next - 1 : first ].position ];
+
+                    for ( int32 a = first; a < next; a++ )
+                    {
+                        Value*& member = members[ sorted[ a ].position ];
+
+                        if ( member != kept )
+                        {
+                            member->owner = nullptr;
+                            delete member;
+                        }
+
+                        member = nullptr;
+                    }
+
+                    members[ sorted[ first ].position ] = kept;
+                    removed                             = true;
+                }
+
+                if ( repeat < count )
+                {
+                    text = nameStarts[ nameBase + repeat - indexedMemberCount ];
+                    return Status::kDuplicateName;
+                }
+
+                if ( removed )
+                {
+                    int32 keptCount = 0;
+
+                    for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
+                    {
+                        if ( members[ a ] )
+                        {
+                            members[ keptCount++ ] = members[ a ];
+                        }
+                    }
+
+                    members.SetArrayElementCount( keptCount );
+
+                    status = MayThrow(
+                        [ & ]()
+                        {
+                            object->BuildMemberIndex( sortedNames, sortScratch );
+                            return Status::kOk;
+                        } );
+                }
+
+                return status;
             }
         };
 
@@ -1502,28 +1745,31 @@ namespace C4
             }
         }
 
-        // Objects with more members than this find a name through a hash index of member positions, smaller ones by
-        // comparing every name.
-        constexpr int32 indexedMemberCount = 16;
-
-        // FNV-1a.
-        uint32 HashName( const char* name ) noexcept
+        int32 ObjectValue::FindIndexSlot( const char* key ) const noexcept
         {
-            uint32 hash = 2166136261U;
+            int32 low  = 0;
+            int32 high = memberIndex.GetArrayElementCount();
 
-            for ( const uint8* byte = reinterpret_cast<const uint8*>( name ); byte[ 0 ] != 0; byte++ )
+            while ( low < high )
             {
-                hash = ( hash ^ byte[ 0 ] ) * 16777619U;
+                int32 middle = low + ( high - low ) / 2;
+
+                if ( CompareNames( members[ memberIndex[ middle ] ]->name, key ) < 0 )
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle;
+                }
             }
 
-            return hash;
+            return low;
         }
 
         int32 ObjectValue::FindMemberPosition( const char* key ) const noexcept
         {
-            int32 slotCount = memberIndex.GetArrayElementCount();
-
-            if ( slotCount == 0 )
+            if ( memberIndex.GetArrayElementCount() == 0 )
             {
                 for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
                 {
@@ -1538,40 +1784,59 @@ namespace C4
                 return -1;
             }
 
-            for ( uint32 slot = HashName( key );; slot++ )
-            {
-                int32 position = memberIndex[ int32( slot & uint32( slotCount - 1 ) ) ] - 1;
+            int32 slot = FindIndexSlot( key );
 
-                if ( ( position < 0 ) || ( members[ position ]->name == key ) )
+            if ( ( slot < memberIndex.GetArrayElementCount() ) && ( members[ memberIndex[ slot ] ]->name == key ) )
+            {
+                return memberIndex[ slot ];
+            }
+
+            return -1;
+        }
+
+        // A merge sort, so that members with the same name stay in document order. The names are sorted with their
+        // positions, so that each comparison reads only the two names.
+        void ObjectValue::BuildMemberIndex( Array<NamedPosition>& sorted, Array<NamedPosition>& scratch )
+        {
+            int32 count = members.GetArrayElementCount();
+
+            sorted.SetArrayElementCount( count );
+            scratch.SetArrayElementCount( count );
+            memberIndex.SetArrayElementCount( count );
+
+            for ( int32 a = 0; a < count; a++ )
+            {
+                sorted[ a ] = NamedPosition { members[ a ]->name, a };
+            }
+
+            NamedPosition* from = sorted.begin();
+            NamedPosition* to   = scratch.begin();
+
+            for ( int32 width = 1; width < count; width *= 2 )
+            {
+                for ( int32 left = 0; left < count; left += 2 * width )
                 {
-                    return position;
+                    int32 middle = ( count - left > width ) ? left + width : count;
+                    int32 right  = ( count - middle > width ) ? middle + width : count;
+                    int32 i      = left;
+                    int32 j      = middle;
+
+                    for ( int32 k = left; k < right; k++ )
+                    {
+                        bool takeLeft = ( j == right ) || ( ( i < middle ) && ( CompareNames( from[ i ].name, from[ j ].name ) <= 0 ) );
+                        to[ k ]       = takeLeft ? from[ i++ ] : from[ j++ ];
+                    }
                 }
-            }
-        }
 
-        void ObjectValue::IndexMember( int32 position ) noexcept
-        {
-            uint32 mask = uint32( memberIndex.GetArrayElementCount() - 1 );
-            uint32 slot = HashName( members[ position ]->name );
-
-            while ( memberIndex[ int32( slot & mask ) ] != 0 )
-            {
-                slot++;
+                NamedPosition* swap = from;
+                from                = to;
+                to                  = swap;
             }
 
-            memberIndex[ int32( slot & mask ) ] = position + 1;
-        }
-
-        void ObjectValue::ReindexMembers() noexcept
-        {
-            for ( int32& slot : memberIndex )
+            for ( int32 a = 0; a < count; a++ )
             {
-                slot = 0;
-            }
-
-            for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
-            {
-                IndexMember( a );
+                sorted[ a ]      = from[ a ];
+                memberIndex[ a ] = from[ a ].position;
             }
         }
 
@@ -1579,26 +1844,24 @@ namespace C4
         {
             int32 count = members.GetArrayElementCount() + 1;
 
-            if ( ( count > indexedMemberCount ) && ( 2 * count > memberIndex.GetArrayElementCount() ) )
+            members.ReserveArrayElementCount( count );
+
+            if ( ( count > indexedMemberCount ) && ( memberIndex.GetArrayElementCount() == 0 ) )
             {
-                int32 slotCount = 64;
+                Array<NamedPosition> sorted;
+                Array<NamedPosition> scratch;
 
-                while ( ( slotCount < 4 * int64( count ) ) && ( slotCount < 0x40000000 ) )
-                {
-                    slotCount *= 2;
-                }
+                BuildMemberIndex( sorted, scratch );
+            }
 
-                memberIndex.SetArrayElementCount( slotCount );
-                ReindexMembers();
+            if ( memberIndex.GetArrayElementCount() != 0 )
+            {
+                memberIndex.ReserveArrayElementCount( count );
+                memberIndex.InsertArrayElement( FindIndexSlot( member->name ), count - 1 );
             }
 
             members.AppendArrayElement( member );
             member->owner = this;
-
-            if ( memberIndex.GetArrayElementCount() != 0 )
-            {
-                IndexMember( count - 1 );
-            }
         }
 
         void ObjectValue::ReplaceMember( int32 position, Value* member ) noexcept
@@ -1621,10 +1884,17 @@ namespace C4
                     members.RemoveArrayElement( a );
                     member->owner = nullptr;
 
-                    if ( memberIndex.GetArrayElementCount() != 0 )
+                    int32 kept = 0;
+
+                    for ( int32 position : memberIndex )
                     {
-                        ReindexMembers();
+                        if ( position != a )
+                        {
+                            memberIndex[ kept++ ] = position - ( position > a );
+                        }
                     }
+
+                    memberIndex.SetArrayElementCount( kept );
 
                     return;
                 }
@@ -1809,28 +2079,15 @@ namespace C4
             return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
         }
 
-        Status ParseJsonRoot(
-            Value*& jsonRoot, const Array<char>& nullTerminatedCharArray, const ParseOptions& options, int32* errorLine, int32* errorColumn ) noexcept
+        Status ParseJsonRoot( Value*& jsonRoot, const char* begin, const char* end, const ParseOptions& options, int32* errorLine, int32* errorColumn ) noexcept
         {
-            if ( nullTerminatedCharArray.GetArrayElementCount() < 2 )
-            {
-                return Status::kTextBufferContentsInvalid;
-            }
-
-            if ( *( nullTerminatedCharArray.end() - 1 ) != 0 )
-            {
-                return Status::kUnterminatedTextBuffer;
-            }
-
-            const char* begin = &nullTerminatedCharArray[ 0 ];
-            const char* end   = nullTerminatedCharArray.end() - 1;
-            const char* text  = begin + ComputeWhitespaceLength( begin );
-
-            Status status = Parser( end, options ).ParseValue( jsonRoot, text, 0 );
+            Parser      parser( begin, end, options );
+            const char* text   = parser.SkipWhitespace( begin );
+            Status      status = parser.ParseValue( jsonRoot, text, 0 );
 
             if ( status == Status::kOk )
             {
-                text += ComputeWhitespaceLength( text );
+                text = parser.SkipWhitespace( text );
 
                 if ( text != end )
                 {
@@ -1852,7 +2109,7 @@ namespace C4
 
                 for ( const char* c = begin; c != text; c++ )
                 {
-                    if ( ( c[ 0 ] == '\n' ) || ( ( c[ 0 ] == '\r' ) && ( c[ 1 ] != '\n' ) ) )
+                    if ( ( c[ 0 ] == '\n' ) || ( ( c[ 0 ] == '\r' ) && ( ( c + 1 == end ) || ( c[ 1 ] != '\n' ) ) ) )
                     {
                         line++;
                         lineStart = c + 1;
@@ -1925,11 +2182,36 @@ namespace C4
 
         ParseResult StructuredData::Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options ) noexcept
         {
+            int32 count = nullTerminatedTextBuffer.GetArrayElementCount();
+
+            if ( ( count >= 2 ) && ( nullTerminatedTextBuffer[ count - 1 ] != 0 ) )
+            {
+                delete rootJsonValue;
+                rootJsonValue = nullptr;
+
+                return ParseResult { Status::kUnterminatedTextBuffer, 0, 0 };
+            }
+
+            return Parse( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
+        }
+
+        ParseResult StructuredData::Parse( const char* text, uint64 length, const ParseOptions& options ) noexcept
+        {
             delete rootJsonValue;
             rootJsonValue = nullptr;
 
+            if ( ( text == nullptr ) || ( length == 0 ) )
+            {
+                return ParseResult { Status::kTextBufferContentsInvalid, 0, 0 };
+            }
+
+            if ( length > JSON4C4_MAX_FILE_SIZE )
+            {
+                return ParseResult { Status::kFileTooLarge, 0, 0 };
+            }
+
             ParseResult parseResult;
-            parseResult.status = ParseJsonRoot( rootJsonValue, nullTerminatedTextBuffer, options, &parseResult.errorLine, &parseResult.errorColumn );
+            parseResult.status = ParseJsonRoot( rootJsonValue, text, text + length, options, &parseResult.errorLine, &parseResult.errorColumn );
 
             return parseResult;
         }

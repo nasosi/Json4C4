@@ -174,15 +174,13 @@ void TestAppendAfterFailure()
     CheckStatus( reparsed.Parse( "Data/Test/out_test14_append.json" ).status, Json::Status::kOk, "reparse the array" );
 }
 
-void TestParseFailures()
+void TestParseFailures( const char* text, Json::Status expected = Json::Status::kOk, const Json::ParseOptions& options = Json::ParseOptions() )
 {
-    const char* text = "{\"a\":[1,2,3,{\"b\":\"a string that is longer than the local buffer\"}],\"c\":{\"d\":null,\"e\":true},\"f\":\"\\u00e9\"}";
-
     long allocationsBefore = allocationTotalCount;
 
     {
         Json::StructuredData sd;
-        CheckStatus( ParseText( sd, text ).status, Json::Status::kOk, "parse without failures" );
+        CheckStatus( ParseText( sd, text, options ).status, expected, "parse without failures" );
     }
 
     long allocationsPerParse = allocationTotalCount - allocationsBefore;
@@ -197,11 +195,10 @@ void TestParseFailures()
             Json::StructuredData sd;
 
             FailAllocationNumber( number );
-            Json::ParseResult parseResult = sd.Parse( buffer );
+            Json::ParseResult parseResult = sd.Parse( buffer, options );
             StopFailing();
 
-            Check( parseResult.status == Json::Status::kException || parseResult.status == Json::Status::kOk,
-                   "a parse with a failing allocation reports an exception" );
+            Check( parseResult.status == Json::Status::kException || parseResult.status == expected, "a parse with a failing allocation reports an exception" );
             Check( ( parseResult.status == Json::Status::kOk ) == ( sd.GetRootJsonValue() != nullptr ), "a failed parse leaves no root" );
 
             failures += ( parseResult.status == Json::Status::kException ) ? 1 : 0;
@@ -221,7 +218,28 @@ int main()
     TestArrayReservation();
     TestSerializeFromFailure();
     TestAppendAfterFailure();
-    TestParseFailures();
+    TestParseFailures( "{\"a\":[1,2,3,{\"b\":\"a string that is longer than the local buffer\"}],\"c\":{\"d\":null,\"e\":true},\"f\":\"\\u00e9\"}" );
+
+    // An object large enough for the name index, with names repeated among its first members and past them.
+    Terathon::String<> large = "{";
+
+    for ( int a = 0; a < 40; a++ )
+    {
+        char member[ 32 ];
+        snprintf( member, sizeof( member ), "%s\"k%d\":[%d]", ( a != 0 ) ? "," : "", ( a % 13 == 12 ) ? a - 10 : a, a );
+        large += member;
+    }
+
+    large += "}";
+
+    Json::ParseOptions keepFirst;
+    Json::ParseOptions keepLast;
+    keepFirst.duplicateNames = Json::DuplicateNames::kKeepFirst;
+    keepLast.duplicateNames  = Json::DuplicateNames::kKeepLast;
+
+    TestParseFailures( large, Json::Status::kOk, keepFirst );
+    TestParseFailures( large, Json::Status::kOk, keepLast );
+    TestParseFailures( large, Json::Status::kDuplicateName );
 
     return TestResult();
 }

@@ -55,6 +55,18 @@
 
 #endif
 
+#ifndef JSON4C4_MAX_VALUE_COUNT
+
+#    define JSON4C4_MAX_VALUE_COUNT 0x7FFFFFFFFFFFFFFF
+
+#endif
+
+#ifndef JSON4C4_MAX_STRING_BYTE_COUNT
+
+#    define JSON4C4_MAX_STRING_BYTE_COUNT 0x7FFFFFFFFFFFFFFF
+
+#endif
+
 #ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
 
 #    error "JSON4C4_ENABLE_STD_SUPPORT_INTERNAL appears defined. Use JSON4C4_DISABLE_STD_SUPPORT instead to control Json4C4 behavior."
@@ -170,7 +182,9 @@ namespace C4
             kNameNotPresent,
             kMaximumNestingDepthExceeded,
             kDuplicateName,
-            kFileWriteError
+            kFileWriteError,
+            kMaximumValueCountExceeded,
+            kMaximumStringByteCountExceeded
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -191,8 +205,10 @@ namespace C4
 
         struct ParseOptions
         {
-            DuplicateNames duplicateNames  = DuplicateNames::kReject;
-            int32          maxNestingDepth = JSON4C4_MAX_NESTING_DEPTH;
+            DuplicateNames duplicateNames     = DuplicateNames::kReject;
+            int32          maxNestingDepth    = JSON4C4_MAX_NESTING_DEPTH;
+            int64          maxValueCount      = JSON4C4_MAX_VALUE_COUNT;
+            int64          maxStringByteCount = JSON4C4_MAX_STRING_BYTE_COUNT;
         };
 
         inline const Detail::Optional optional;
@@ -262,6 +278,7 @@ namespace C4
         class Value
         {
             friend class ObjectValue;
+            friend class Parser;
 
         private:
             ObjectValue* owner = nullptr;
@@ -547,12 +564,18 @@ namespace C4
             friend class Parser;
 
         private:
+            struct NamedPosition
+            {
+                const char* name;
+                int32       position;
+            };
+
             Array<Value*, 8> members;
             Array<int32>     memberIndex;
 
+            int32 FindIndexSlot( const char* key ) const noexcept;
             int32 FindMemberPosition( const char* key ) const noexcept;
-            void  IndexMember( int32 position ) noexcept;
-            void  ReindexMembers() noexcept;
+            void  BuildMemberIndex( Array<NamedPosition>& sorted, Array<NamedPosition>& scratch );
             void  AppendMember( Value* member );
             void  ReplaceMember( int32 position, Value* member ) noexcept;
             void  RemoveMember( Value* member ) noexcept;
@@ -654,6 +677,7 @@ namespace C4
 
             TERATHON_API ParseResult Parse( const char* fileName, const ParseOptions& options = ParseOptions() ) noexcept;
             TERATHON_API ParseResult Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options = ParseOptions() ) noexcept;
+            TERATHON_API ParseResult Parse( const char* text, uint64 length, const ParseOptions& options = ParseOptions() ) noexcept;
 
             TERATHON_API Status Write( const char* fileName, const uint32 indentationLength = 2, const char indentationChar = ' ' ) noexcept;
 

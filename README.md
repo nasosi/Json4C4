@@ -87,8 +87,14 @@ For optional arguments, you can use the keyword ```Json::optional``` to designat
     Json::optional, "height", object.height
 ```
 
+### Parsing text in memory
+```Parse``` also reads a text in memory from a pointer and a length. The text needs no terminating zero, and it is not copied:
+```cxx
+auto parseResult = jsonStructuredData.Parse( text, length );
+```
+
 ### Parse options
-Both ```Parse``` overloads take an optional ```Json::ParseOptions```:
+Every ```Parse``` overload takes an optional ```Json::ParseOptions```:
 ```cxx
 Json::ParseOptions options;
 options.duplicateNames  = Json::DuplicateNames::kKeepLast;
@@ -98,6 +104,7 @@ auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", option
 ```
 * ```duplicateNames``` decides what happens when an object repeats a name. ```kReject``` (the default) fails with ```Status::kDuplicateName```, ```kKeepFirst``` keeps the first value and ```kKeepLast``` keeps the last one. A kept name stays where it first appeared.
 * ```maxNestingDepth``` limits how deeply arrays and objects may nest. Deeper documents fail with ```Status::kMaximumNestingDepthExceeded``` instead of exhausting the stack. The default is ```JSON4C4_MAX_NESTING_DEPTH``` (256).
+* ```maxValueCount``` limits how many values (objects, arrays, strings, numbers, ```true```, ```false``` and ```null```) a document may hold, and ```maxStringByteCount``` how many bytes its names and strings may hold together, counted after their escapes are decoded. A document past either limit fails with ```Status::kMaximumValueCountExceeded``` or ```Status::kMaximumStringByteCountExceeded``` before the value or string past the limit is allocated. Neither is limited by default.
 
 ### Numbers
 Numbers are read correctly rounded and written in the shortest form that reads back to the same value, with the same results in every build and locale. Values from 1e-6 up to 1e21 are written as plain decimals and others in exponent form, for example ```1e+21``` and ```1e-7```.
@@ -190,8 +197,11 @@ When ```JSON4C4_DISABLE_STD_SUPPORT``` is defined, or when ```TERATHON_NO_SYSTEM
 ### ```JSON4C4_MAX_NESTING_DEPTH```
 The default for ```ParseOptions::maxNestingDepth```, 256 unless defined otherwise.
 
+### ```JSON4C4_MAX_VALUE_COUNT``` and ```JSON4C4_MAX_STRING_BYTE_COUNT```
+The defaults for ```ParseOptions::maxValueCount``` and ```ParseOptions::maxStringByteCount```, no limit (0x7FFFFFFFFFFFFFFF) unless defined otherwise.
+
 ### ```JSON4C4_MAX_FILE_SIZE```
-The largest file ```Parse``` reads and ```Write``` produces, 0x7FFFFFFE bytes unless defined otherwise.
+The largest file or text ```Parse``` reads and ```Write``` produces, 0x7FFFFFFE bytes unless defined otherwise. A longer text fails with ```Status::kFileTooLarge```.
 
 ## Third party licenses
 Third-party licenses are located in the ```Licenses``` subfolder.
