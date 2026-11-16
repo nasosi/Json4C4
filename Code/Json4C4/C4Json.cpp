@@ -609,11 +609,12 @@ namespace C4
                                                     "Maximum value count exceeded",
                                                     "Maximum string byte count exceeded",
                                                     "A block source refused an allocation",
-                                                    "String holds a zero character" };
+                                                    "String holds a zero character",
+                                                    "Array index out of range" };
 
         constexpr unsigned int statusStringCount = sizeof( StatusString ) / sizeof( StatusString[ 0 ] );
 
-        static_assert( statusStringCount == (unsigned int)( Status::kStringHoldsZero ) + 1, "StatusString must have one entry per Status" );
+        static_assert( statusStringCount == (unsigned int)( Status::kIndexOutOfRange ) + 1, "StatusString must have one entry per Status" );
 
         TERATHON_API String<256> StatusToString( const Status& status ) noexcept
         {
@@ -2646,6 +2647,30 @@ namespace C4
                 return other[ length ] == 0;
             }
 
+            // The place in the index of a large object where a name is, or would go.
+            uint32 FindIndexSlot( const Member* members, const uint32* index, uint32 count, const char* name, uint32 length ) noexcept
+            {
+                uint32 low  = 0;
+                uint32 high = count;
+
+                while ( low < high )
+                {
+                    uint32            middle     = low + ( high - low ) / 2;
+                    const StringView& memberName = members[ index[ middle ] ].GetName();
+
+                    if ( CompareNames( memberName.GetText(), memberName.GetLength(), name, length ) < 0 )
+                    {
+                        low = middle + 1;
+                    }
+                    else
+                    {
+                        high = middle;
+                    }
+                }
+
+                return low;
+            }
+
             const Value* ObjectView::Find( const char* name, uint32 length ) const noexcept
             {
                 if ( !object || !name )
@@ -2669,31 +2694,15 @@ namespace C4
                     return nullptr;
                 }
 
-                const uint32* index = reinterpret_cast<const uint32*>( members + count );
-                uint32        low   = 0;
-                uint32        high  = count;
+                const uint32* index = reinterpret_cast<const uint32*>( members + object->GetCapacity() );
+                uint32        slot  = FindIndexSlot( members, index, count, name, length );
 
-                while ( low < high )
-                {
-                    uint32            middle     = low + ( high - low ) / 2;
-                    const StringView& memberName = members[ index[ middle ] ].name;
-
-                    if ( CompareNames( memberName.GetText(), memberName.GetLength(), name, length ) < 0 )
-                    {
-                        low = middle + 1;
-                    }
-                    else
-                    {
-                        high = middle;
-                    }
-                }
-
-                if ( low == count )
+                if ( slot == count )
                 {
                     return nullptr;
                 }
 
-                const Member& member = members[ index[ low ] ];
+                const Member& member = members[ index[ slot ] ];
 
                 return SameName( member.name.GetText(), member.name.GetLength(), name, length ) ? &member.value : nullptr;
             }
@@ -4437,10 +4446,128 @@ namespace C4
                 return builder ? builder->Record( builder->CloseSince( openCount ) ) : Status::kInvalidValueType;
             }
 
-            // The builder lives in a block of its own, handed back when the build ends.
-            Status StructuredData::BeginBuild( Node& rootNode ) noexcept
+            Status Serialize( Node node, const Value& value ) noexcept
             {
-                Clear();
+                switch ( value.GetType() )
+                {
+                    case Type::kNull:
+                        return node.SetNull();
+
+                    case Type::kBool:
+                        return node.SetBool( *value.AsBool() );
+
+                    case Type::kNumber:
+                        return node.SetNumber( *value.AsNumber() );
+
+                    case Type::kString:
+                        return node.SetString( value.AsString().GetText(), value.AsString().GetLength() );
+
+                    case Type::kArray:
+                    {
+                        Status status = node.SetArray();
+
+                        for ( const Value& element : value.AsArray() )
+                        {
+                            Node copy;
+
+                            status = ( status == Status::kOk ) ? node.AppendElement( copy ) : status;
+                            status = ( status == Status::kOk ) ? SerializeValue( copy, element ) : status;
+                        }
+
+                        return status;
+                    }
+
+                    case Type::kObject:
+                    {
+                        Status status = node.SetObject();
+
+                        for ( const Member& member : value.AsObject() )
+                        {
+                            Node copy;
+
+                            status = ( status == Status::kOk ) ? node.AddMember( member.GetName().GetText(), member.GetName().GetLength(), copy ) : status;
+                            status = ( status == Status::kOk ) ? SerializeValue( copy, member.GetValue() ) : status;
+                        }
+
+                        return status;
+                    }
+                }
+
+                return Status::kInvalidValueType;
+            }
+
+            // Puts the position of a member into the index of a large object, which holds the positions of count members.
+            void InsertIntoIndex( const Member* members, uint32* index, uint32 count, uint32 position ) noexcept
+            {
+                const StringView& name = members[ position ].GetName();
+                uint32            slot = FindIndexSlot( members, index, count, name.GetText(), name.GetLength() );
+
+                for ( uint32 a = count; a > slot; a-- )
+                {
+                    index[ a ] = index[ a - 1 ];
+                }
+
+                index[ slot ] = position;
+            }
+
+            // An edit is refused while a build is open, and for a value that is not of the type it needs or not in one of
+            // this document's blocks, such as a value of another document.
+            Status StructuredData::CheckEdit( const Value& target, Type type ) const noexcept
+            {
+                if ( builder || ( target.type != type ) )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                machine_address address = reinterpret_cast<machine_address>( &target );
+
+                for ( const Block* block = blocks; block; block = block->next )
+                {
+                    machine_address start = reinterpret_cast<machine_address>( block + 1 );
+                    machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
+
+                    if ( ( address >= start ) && ( address < end ) )
+                    {
+                        return Status::kOk;
+                    }
+                }
+
+                return Status::kInvalidValueType;
+            }
+
+            // The builder lives in a block of its own, handed back when the build ends.
+            Status StructuredData::BeginBuild( const Edit& edit, Node& rootNode ) noexcept
+            {
+                Status status = builder ? Status::kInvalidValueType : Status::kOk;
+
+                switch ( edit.kind )
+                {
+                    case EditKind::kDocument:
+                        break;
+
+                    case EditKind::kReplace:
+                        status = CheckEdit( *edit.target, edit.target->type );
+                        break;
+
+                    case EditKind::kAppend:
+                        status = CheckEdit( *edit.target, Type::kArray );
+                        break;
+
+                    case EditKind::kAddMember:
+                        status = CheckEdit( *edit.target, Type::kObject );
+                        status = ( ( status == Status::kOk ) && edit.target->AsObject().Find( edit.name, edit.length ) ) ? Status::kDuplicateName : status;
+                        break;
+                }
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                if ( edit.kind == EditKind::kDocument )
+                {
+                    Clear();
+                }
 
                 void* memory = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
 
@@ -4449,56 +4576,285 @@ namespace C4
                     return Status::kAllocationRefused;
                 }
 
-                builder = new ( memory ) Builder( *this );
-
-                if ( !builder->children.Push( Value() ) )
-                {
-                    return Status::kAllocationRefused;
-                }
-
+                builder          = new ( memory ) Builder( *this );
                 rootNode.builder = builder;
                 rootNode.offset  = 0;
 
-                return Status::kOk;
+                return builder->children.Push( Value() ) ? Status::kOk : Status::kAllocationRefused;
             }
 
-            Status StructuredData::EndBuild( Status status ) noexcept
+            // The edit is made only when its value is built, so that a failed edit leaves the document as it was. A failed
+            // SerializeFrom leaves it empty.
+            Status StructuredData::EndBuild( const Edit& edit, const Node& rootNode, Status status ) noexcept
             {
-                Value* built = nullptr;
-
-                if ( builder )
+                if ( !rootNode.builder )
                 {
-                    status = ( status == Status::kOk ) ? builder->failure : status;
-
-                    if ( status == Status::kOk )
-                    {
-                        built = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
-
-                        if ( built )
-                        {
-                            *built = builder->At( 0 );
-                        }
-                        else
-                        {
-                            status = Status::kAllocationRefused;
-                        }
-                    }
-
-                    builder->~Builder();
-                    blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
-                    builder = nullptr;
+                    return status;
                 }
 
-                if ( status == Status::kOk )
-                {
-                    root = built;
-                }
-                else
+                status      = ( status == Status::kOk ) ? builder->failure : status;
+                Value built = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
+
+                builder->~Builder();
+                blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
+                builder = nullptr;
+
+                status = ( status == Status::kOk ) ? Splice( edit, built ) : status;
+
+                if ( ( status != Status::kOk ) && ( edit.kind == EditKind::kDocument ) )
                 {
                     Clear();
                 }
 
                 return status;
+            }
+
+            Status StructuredData::Splice( const Edit& edit, const Value& built ) noexcept
+            {
+                if ( edit.kind == EditKind::kDocument )
+                {
+                    Value* value = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
+
+                    if ( !value )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    *value = built;
+                    root   = value;
+
+                    return Status::kOk;
+                }
+
+                Value& target = const_cast<Value&>( *edit.target );
+
+                if ( edit.kind == EditKind::kReplace )
+                {
+                    target = built;
+
+                    return Status::kOk;
+                }
+
+                const char* name = "";
+
+                if ( edit.length != 0 )
+                {
+                    char* copy = AllocateBytes( edit.length );
+
+                    if ( !copy )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    for ( uint32 a = 0; a < edit.length; a++ )
+                    {
+                        copy[ a ] = edit.name[ a ];
+                    }
+
+                    name = copy;
+                }
+
+                if ( !MakeRoom( target ) )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                if ( edit.kind == EditKind::kAppend )
+                {
+                    const_cast<Value*>( target.data.elements )[ target.count++ ] = built;
+
+                    return Status::kOk;
+                }
+
+                Member* members = const_cast<Member*>( target.data.members );
+                uint32  room    = target.GetCapacity();
+
+                members[ target.count ].name  = StringView( name, edit.length );
+                members[ target.count ].value = built;
+
+                if ( room > uint32( indexedMemberCount ) )
+                {
+                    InsertIntoIndex( members, reinterpret_cast<uint32*>( members + room ), target.count, target.count );
+                }
+
+                target.count++;
+
+                return Status::kOk;
+            }
+
+            // Gives an array or object room for one more element or member. The first edit that adds to one moves it into
+            // room for a power of two of them, at least 4, which doubles when it is full. An object with room for more
+            // than 16 members keeps its index after that room, even while it has fewer members.
+            bool StructuredData::MakeRoom( Value& container ) noexcept
+            {
+                uint32 count    = container.count;
+                uint32 capacity = container.GetCapacity();
+
+                if ( ( container.capacityShift != 0 ) && ( count < capacity ) )
+                {
+                    return true;
+                }
+
+                uint8 shift = 2;
+
+                while ( ( shift < 31 ) && ( ( uint32( 1 ) << shift ) <= count ) )
+                {
+                    shift++;
+                }
+
+                uint32 room = uint32( 1 ) << shift;
+
+                if ( room <= count )
+                {
+                    return false;
+                }
+
+                bool   isObject  = container.type == Type::kObject;
+                uint64 itemSize  = isObject ? sizeof( Member ) : sizeof( Value );
+                bool   indexed   = isObject && ( room > uint32( indexedMemberCount ) );
+                uint64 indexSize = indexed ? uint64( room ) * sizeof( uint32 ) : 0;
+                char*  storage   = static_cast<char*>( AllocateAligned( uint64( room ) * itemSize + indexSize ) );
+
+                if ( !storage )
+                {
+                    return false;
+                }
+
+                if ( count != 0 )
+                {
+                    CopyWords( storage, isObject ? static_cast<const void*>( container.data.members ) : container.data.elements, uint64( count ) * itemSize );
+                }
+
+                if ( indexed )
+                {
+                    const Member* members = reinterpret_cast<const Member*>( storage );
+                    uint32*       index   = reinterpret_cast<uint32*>( storage + uint64( room ) * itemSize );
+
+                    if ( capacity > uint32( indexedMemberCount ) )
+                    {
+                        const uint32* oldIndex = reinterpret_cast<const uint32*>( container.data.members + capacity );
+
+                        for ( uint32 a = 0; a < count; a++ )
+                        {
+                            index[ a ] = oldIndex[ a ];
+                        }
+                    }
+                    else
+                    {
+                        for ( uint32 a = 0; a < count; a++ )
+                        {
+                            InsertIntoIndex( members, index, a, a );
+                        }
+                    }
+                }
+
+                if ( isObject )
+                {
+                    container.data.members = reinterpret_cast<const Member*>( storage );
+                }
+                else
+                {
+                    container.data.elements = reinterpret_cast<const Value*>( storage );
+                }
+
+                container.capacityShift = shift;
+
+                return true;
+            }
+
+            Status StructuredData::RemoveElement( const Value& array, uint32 index ) noexcept
+            {
+                Status status = CheckEdit( array, Type::kArray );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                if ( index >= array.count )
+                {
+                    return Status::kIndexOutOfRange;
+                }
+
+                Value& edited   = const_cast<Value&>( array );
+                Value* elements = const_cast<Value*>( edited.data.elements );
+
+                for ( uint32 a = index + 1; a < edited.count; a++ )
+                {
+                    elements[ a - 1 ] = elements[ a ];
+                }
+
+                edited.count--;
+
+                return Status::kOk;
+            }
+
+            // The members after the one removed move down, so that the others keep their order. An object without room to
+            // spare keeps its index right after its members, so the index moves down with them.
+            Status StructuredData::RemoveMember( const Value& object, const char* name, uint32 length ) noexcept
+            {
+                Status status = CheckEdit( object, Type::kObject );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                if ( !name )
+                {
+                    return Status::kNameNotPresent;
+                }
+
+                Value&  edited   = const_cast<Value&>( object );
+                Member* members  = const_cast<Member*>( edited.data.members );
+                uint32  count    = edited.count;
+                uint32  capacity = edited.GetCapacity();
+                uint32* index    = ( capacity > uint32( indexedMemberCount ) ) ? reinterpret_cast<uint32*>( members + capacity ) : nullptr;
+                uint32  slot     = 0;
+                uint32  position = 0;
+
+                if ( index )
+                {
+                    slot     = FindIndexSlot( members, index, count, name, length );
+                    position = ( slot < count ) ? index[ slot ] : count;
+                }
+                else
+                {
+                    while ( ( position < count ) && !SameName( members[ position ].name.GetText(), members[ position ].name.GetLength(), name, length ) )
+                    {
+                        position++;
+                    }
+                }
+
+                if ( ( position == count ) || !SameName( members[ position ].name.GetText(), members[ position ].name.GetLength(), name, length ) )
+                {
+                    return Status::kNameNotPresent;
+                }
+
+                for ( uint32 a = position + 1; a < count; a++ )
+                {
+                    members[ a - 1 ] = members[ a ];
+                }
+
+                uint32 room = ( edited.capacityShift != 0 ) ? capacity : count - 1;
+
+                if ( room > uint32( indexedMemberCount ) )
+                {
+                    uint32* movedIndex = reinterpret_cast<uint32*>( members + room );
+                    uint32  kept       = 0;
+
+                    for ( uint32 a = 0; a < count; a++ )
+                    {
+                        if ( a != slot )
+                        {
+                            movedIndex[ kept++ ] = index[ a ] - uint32( index[ a ] > position );
+                        }
+                    }
+                }
+
+                edited.count = count - 1;
+
+                return Status::kOk;
             }
         } // namespace V3
 

@@ -186,7 +186,8 @@ namespace C4
             kMaximumValueCountExceeded,
             kMaximumStringByteCountExceeded,
             kAllocationRefused,
-            kStringHoldsZero
+            kStringHoldsZero,
+            kIndexOutOfRange
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -1767,6 +1768,7 @@ namespace C4
             class Member;
             class Node;
             class Builder;
+            class StructuredData;
 
             class Value
             {
@@ -1776,6 +1778,7 @@ namespace C4
                 friend class PendingValues;
                 friend class Builder;
                 friend class Node;
+                friend class StructuredData;
 
             public:
                 Type GetType() const noexcept
@@ -1822,11 +1825,19 @@ namespace C4
                     const Member* members;
                 };
 
-                Type   type    = Type::kNull;
-                bool   integer = false;
-                uint32 count   = 0;
-                Data   data    = {};
+                Type   type          = Type::kNull;
+                bool   integer       = false;
+                uint8  capacityShift = 0; // an edited array or object holds room for 1 << capacityShift
+                uint32 count         = 0;
+                Data   data          = {};
+
+                uint32 GetCapacity() const noexcept
+                {
+                    return ( capacityShift != 0 ) ? uint32( 1 ) << capacityShift : count;
+                }
             };
+
+            static_assert( sizeof( Value ) == 16, "A Value is 16 bytes" );
 
             class Member
             {
@@ -1835,6 +1846,7 @@ namespace C4
                 friend class PendingValues;
                 friend class Builder;
                 friend class Node;
+                friend class StructuredData;
 
             public:
                 const StringView& GetName() const noexcept
@@ -1893,7 +1905,7 @@ namespace C4
             };
 
             // Objects of more than 16 members find a name through an index of their members sorted by name, which
-            // follows the members. Smaller ones compare every name.
+            // follows the room for their members. Smaller ones compare every name.
             class ObjectView
             {
                 friend class Value;
@@ -1983,8 +1995,25 @@ namespace C4
                 return ( type == Type::kObject ) ? ObjectView( this ) : ObjectView();
             }
 
+            namespace Detail
+            {
+                inline uint32 GetTextLength( const char* text ) noexcept
+                {
+                    uint32 length = 0;
+
+                    while ( text[ length ] != 0 )
+                    {
+                        length++;
+                    }
+
+                    return length;
+                }
+            } // namespace Detail
+
             // A document. Everything it holds lives in blocks from its block source, which it hands back when it is
-            // cleared, parsed again or destroyed. Values, strings and views taken from it are valid until then.
+            // cleared, parsed again or destroyed. Values, strings and views taken from it are valid until then, except
+            // that an edit moves the elements or members of the array or object it changes: pointers to them, and views
+            // and pointers into them, are not valid after it, while views of the edited value itself stay valid.
             class StructuredData
             {
                 friend class DocumentParser;
@@ -2018,6 +2047,32 @@ namespace C4
                 template <class T>
                 Status SerializeFrom( const T& data ) noexcept;
 
+                // Edits of a value of this document, taken from its views. The new value is built before anything
+                // changes, so it may be built from the value it replaces or joins, and a failure leaves the document as
+                // it was. Memory a removal frees, or an array or object outgrows, comes back when the document is cleared.
+                template <class T>
+                Status SerializeAt( const Value& target, const T& data ) noexcept;
+
+                template <class T>
+                Status AppendElement( const Value& array, const T& data ) noexcept;
+
+                template <class T>
+                Status AddMember( const Value& object, const char* name, uint32 length, const T& data ) noexcept;
+
+                template <class T>
+                Status AddMember( const Value& object, const char* name, const T& data ) noexcept
+                {
+                    return AddMember( object, name, Detail::GetTextLength( name ), data );
+                }
+
+                TERATHON_API Status RemoveElement( const Value& array, uint32 index ) noexcept;
+                TERATHON_API Status RemoveMember( const Value& object, const char* name, uint32 length ) noexcept;
+
+                Status RemoveMember( const Value& object, const char* name ) noexcept
+                {
+                    return RemoveMember( object, name, Detail::GetTextLength( name ) );
+                }
+
                 TERATHON_API void Clear() noexcept;
 
             private:
@@ -2035,12 +2090,35 @@ namespace C4
                 const Value* root          = nullptr;
                 Builder*     builder       = nullptr;
 
+                enum class EditKind : uint8
+                {
+                    kDocument,
+                    kReplace,
+                    kAppend,
+                    kAddMember
+                };
+
+                struct Edit
+                {
+                    EditKind     kind;
+                    const Value* target;
+                    const char*  name;
+                    uint32       length;
+                };
+
                 void* AllocateAligned( uint64 size ) noexcept;
                 char* AllocateBytes( uint64 size ) noexcept;
                 void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
 
-                TERATHON_API Status BeginBuild( Node& rootNode ) noexcept;
-                TERATHON_API Status EndBuild( Status status ) noexcept;
+                template <class T>
+                Status Build( const Edit& edit, const T& data ) noexcept;
+
+                TERATHON_API Status BeginBuild( const Edit& edit, Node& rootNode ) noexcept;
+                TERATHON_API Status EndBuild( const Edit& edit, const Node& rootNode, Status status ) noexcept;
+
+                Status CheckEdit( const Value& target, Type type ) const noexcept;
+                Status Splice( const Edit& edit, const Value& built ) noexcept;
+                bool   MakeRoom( Value& container ) noexcept;
             };
 
             // The names and array indices from the root to the value at fault when a read fails, innermost first. The
@@ -2801,14 +2879,7 @@ namespace C4
 
                 Status AddMember( const char* name, Node& member ) noexcept
                 {
-                    uint32 length = 0;
-
-                    while ( name[ length ] != 0 )
-                    {
-                        length++;
-                    }
-
-                    return AddMember( name, length, member );
+                    return AddMember( name, Detail::GetTextLength( name ), member );
                 }
 
                 // For SerializeValue, which closes the arrays and objects that a Serialize call opened.
@@ -2834,6 +2905,9 @@ namespace C4
             {
                 return node.SetNull();
             }
+
+            // Copies a value of this document or another.
+            TERATHON_API Status Serialize( Node node, const Value& value ) noexcept;
 
             inline Status Serialize( Node node, const String<>& data ) noexcept
             {
@@ -2991,14 +3065,38 @@ namespace C4
             }
 
             template <class T>
-            Status StructuredData::SerializeFrom( const T& data ) noexcept
+            Status StructuredData::Build( const Edit& edit, const T& data ) noexcept
             {
                 Node   rootNode;
-                Status status = BeginBuild( rootNode );
+                Status status = BeginBuild( edit, rootNode );
 
                 status = ( status == Status::kOk ) ? SerializeValue( rootNode, data ) : status;
 
-                return EndBuild( status );
+                return EndBuild( edit, rootNode, status );
+            }
+
+            template <class T>
+            Status StructuredData::SerializeFrom( const T& data ) noexcept
+            {
+                return Build( Edit { EditKind::kDocument, nullptr, nullptr, 0 }, data );
+            }
+
+            template <class T>
+            Status StructuredData::SerializeAt( const Value& target, const T& data ) noexcept
+            {
+                return Build( Edit { EditKind::kReplace, &target, nullptr, 0 }, data );
+            }
+
+            template <class T>
+            Status StructuredData::AppendElement( const Value& array, const T& data ) noexcept
+            {
+                return Build( Edit { EditKind::kAppend, &array, nullptr, 0 }, data );
+            }
+
+            template <class T>
+            Status StructuredData::AddMember( const Value& object, const char* name, uint32 length, const T& data ) noexcept
+            {
+                return Build( Edit { EditKind::kAddMember, &object, name, length }, data );
             }
         } // namespace V3
 
