@@ -201,14 +201,16 @@ namespace C4
         Status MayThrow( Func&& func ) noexcept
         {
             // When TERATHON_NO_SYSTEM is defined, operator new doesn't throw, so there is no much point in including try/catch
-#if ( ( ( defined( __GNUC__ ) || defined( __GNUG__ ) || defined( __clang__ ) ) && defined( __cpp_exceptions ) ) || defined( _MSC_VER ) ) &&                    \
+#if ( ( ( defined( __GNUC__ ) || defined( __GNUG__ ) || defined( __clang__ ) ) && defined( __cpp_exceptions ) ) ||                                             \
+      ( defined( _MSC_VER ) && defined( _CPPUNWIND ) ) ) &&                                                                                                    \
     !defined( TERATHON_NO_SYSTEM )
             try
 #endif
             {
                 return func();
             }
-#if ( ( ( defined( __GNUC__ ) || defined( __GNUG__ ) || defined( __clang__ ) ) && defined( __cpp_exceptions ) ) || defined( _MSC_VER ) ) &&                    \
+#if ( ( ( defined( __GNUC__ ) || defined( __GNUG__ ) || defined( __clang__ ) ) && defined( __cpp_exceptions ) ) ||                                             \
+      ( defined( _MSC_VER ) && defined( _CPPUNWIND ) ) ) &&                                                                                                    \
     !defined( TERATHON_NO_SYSTEM )
             catch ( ... )
             {
