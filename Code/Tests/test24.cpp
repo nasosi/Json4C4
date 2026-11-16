@@ -362,12 +362,15 @@ struct Meddler
     Json::EditHandle*     target = nullptr;
     mutable Json::Status  edit   = Json::Status::kOk;
     mutable Json::Status  build  = Json::Status::kOk;
+    mutable Json::Status  parse  = Json::Status::kOk;
 };
 
 Json::Status Serialize( Json::Node node, const Meddler& meddler ) noexcept
 {
     meddler.edit  = meddler.data->AppendElement( *meddler.target, 1.0 );
     meddler.build = meddler.data->SerializeFrom( 2.0 );
+    meddler.parse = Parse( *meddler.data, "[ 4 ]" );
+    meddler.data->Clear();
 
     return node.SetNumber( 3 );
 }
@@ -388,7 +391,8 @@ void TestEditsDuringBuild()
     CheckStatus( data.AppendElement( root, meddler ), Json::Status::kOk, "append through a Serialize that edits" );
     CheckStatus( meddler.edit, Json::Status::kInvalidValueType, "an edit during a build is refused" );
     CheckStatus( meddler.build, Json::Status::kInvalidValueType, "a SerializeFrom during a build is refused" );
-    Check( Holds( data, "[ 1, 3 ]" ), "the build goes on" );
+    CheckStatus( meddler.parse, Json::Status::kInvalidValueType, "a parse during a build is refused" );
+    Check( Holds( data, "[ 1, 3 ]" ), "the build goes on, and a Clear during it does nothing" );
 }
 
 // Parses an object and edits it: members added past 16, forty elements appended to an array in it, the parsed members

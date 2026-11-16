@@ -1520,8 +1520,14 @@ namespace C4
             Clear();
         }
 
+        // A Serialize that clears the document it is building leaves it as it is, so that the build keeps its blocks.
         void StructuredData::Clear() noexcept
         {
+            if ( builder )
+            {
+                return;
+            }
+
             while ( blocks )
             {
                 Block* next = blocks->next;
@@ -2290,6 +2296,11 @@ namespace C4
 
         ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
         {
+            if ( builder )
+            {
+                return ParseResult { Status::kInvalidValueType, 0, 0 };
+            }
+
             Clear();
 
             if ( ( text == nullptr ) || ( length == 0 ) )
@@ -2340,6 +2351,11 @@ namespace C4
         {
             int32 count = nullTerminatedTextBuffer.GetArrayElementCount();
 
+            if ( builder )
+            {
+                return ParseResult { Status::kInvalidValueType, 0, 0 };
+            }
+
             if ( ( count >= 2 ) && ( nullTerminatedTextBuffer[ count - 1 ] != 0 ) )
             {
                 Clear();
@@ -2353,6 +2369,11 @@ namespace C4
         // The text of a file is read into a block from the block source, handed back when the parse ends.
         ParseResult StructuredData::Parse( const char* fileName, const ParseOptions& options ) noexcept
         {
+            if ( builder )
+            {
+                return ParseResult { Status::kInvalidValueType, 0, 0 };
+            }
+
             Clear();
 
             File       file;
