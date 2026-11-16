@@ -7,7 +7,7 @@
 # Json4C4
 Json4C4 is a general-purpose JSON library developed to integrate well with the [C4 Engine](https://c4engine.com/). Json4C4 can also be used in any C++ application if desired.
 
-Json4C4 is appropriate for parsing, deserialization, serialization, and validation. The library provides ways for the simple definition of the data structure prototype to enable seamless interoperability with user-defined objects. It is compliant with the [RFC 8259 (STD90) standard](https://datatracker.ietf.org/doc/html/rfc8259) and supports accurate JSON file syntax-error reporting. It is fast, and its number conversions are exact and identical in every build.
+Json4C4 is appropriate for parsing, deserialization, serialization, validation and editing. The library provides ways for the simple definition of the data structure prototype to enable seamless interoperability with user-defined objects. It is compliant with the [RFC 8259 (STD90) standard](https://datatracker.ietf.org/doc/html/rfc8259) and supports accurate JSON file syntax-error reporting. It is fast, and its number conversions are exact and identical in every build.
 
 Json4C4  has no external dependencies. It internally uses parts of the [Terathon Container](https://github.com/EricLengyel/Terathon-Container-Library), the [OpenDDL Reference Implementation](https://github.com/EricLengyel/OpenDDL) and  [Terathon Math](https://github.com/EricLengyel/Terathon-Math-Library) libraries, and the [NumberTextThree](https://github.com/nasosi/NumberTextThree) header for number conversions.
 
@@ -23,33 +23,35 @@ struct TextBox
 ```
 First, you need to define the process rules for deserialization/serialization/validation:
 ```cxx
-Json::Status Deserialize( const Json::Value* value, TextBox& object )
+Json::Status DeserializeTraced( const Json::Value& value, TextBox& object, Json::ReadPath& path )
 {
-    return Json::DeserializeProto( value,
+    return Json::DeserializeProto( value, path,
         "text",   object.text,
         "width",  object.width,
         "height", object.height
-	);
+    );
 }
 
-Json::Status Serialize( Json::Value* value, const TextBox& object )
+Json::Status Serialize( Json::Node node, const TextBox& object )
 {
-    return Json::SerializeProto( value,
+    return Json::SerializeProto( node,
         "text",   object.text,
         "width",  object.width,
         "height", object.height
-	);
+    );
 }
 
-Json::Status Validate( const Json::Value* value, const TextBox& object )
+Json::Status ValidateTraced( const Json::Value& value, const TextBox& object, Json::ReadPath& path )
 {
-    return Json::ValidateProto( value,
+    return Json::ValidateProto( value, path,
         "text",   object.text,
         "width",  object.width,
         "height", object.height
-	);
+    );
 }
 ```
+The ```path``` collects the names and array indices that lead to a value that fails, so that ```Json::Read``` can say where it is (see below).
+
 Alternatively, you can use Json4C4's ```DEFINE_JSON4C4_FUNCTIONS``` macro, which generates all three definitions:
 ```cxx
 #define TEXTBOX_PROTO \
@@ -78,6 +80,20 @@ printf( "TextBox text: %s. Width: %f, height: %f\n",
 ```
 If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
+### Reading in one call
+```Json::Read``` parses a file, or a text in memory, and deserializes it in one call. When it fails, the ```Json::ReadResult``` it returns tells where: a syntax error gives its line and column, and a value that does not fit the structure gives its path, such as ```boxes[2].width```, and its line and column. A member that is missing gives the line and column of the object that should hold it.
+```cxx
+TextBox          textBox;
+Json::ReadResult result = Json::Read( "Data/Examples/simple.json", textBox );
+
+if ( result.status != Json::Status::kOk )
+{
+    fprintf( stderr, "%s at %s, line %d, column %d\n",
+             static_cast< const char* >( Json::StatusToString( result.status ) ),
+             static_cast< const char* >( result.path ), int( result.errorLine ), int( result.errorColumn ) );
+}
+```
+
 ### Optional arguments
 For optional arguments, you can use the keyword ```Json::optional``` to designate them as such before the field name. For example, in the following, absence of ```height``` in the JSON file will not result in an error and the relevant member will be ignored:
 ```cxx
@@ -86,6 +102,7 @@ For optional arguments, you can use the keyword ```Json::optional``` to designat
     "width",  object.width,\
     Json::optional, "height", object.height
 ```
+An optional member that is present must be valid as a whole: a member missing inside it fails like any other.
 
 ### Parsing text in memory
 ```ParseText``` reads a text in memory from a pointer and a length. The text needs no terminating zero, and it is not copied:
@@ -108,6 +125,107 @@ auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", option
 
 ### Numbers
 Numbers are read correctly rounded and written in the shortest form that reads back to the same value, with the same results in every build and locale. Values from 1e-6 up to 1e21 are written as plain decimals and others in exponent form, for example ```1e+21``` and ```1e-7```.
+
+## Documents and values
+A ```Json::StructuredData``` holds a document, and ```GetRoot()``` gives its root ```Json::Value```, or ```nullptr``` when it holds none. A ```Value``` tells its type with ```GetType()``` and gives its contents with ```AsBool()```, ```AsNumber()```, ```AsString()```, ```AsArray()``` and ```AsObject()```, which give ```nullptr``` or an empty view for a value of another type. ```IsNull()``` tests for ```null``` and ```IsInteger()``` for a number written without a fraction or an exponent.
+```cxx
+Json::ObjectView box = jsonStructuredData.GetRoot()->AsObject();
+
+if ( const double* width = box.FindNumber( "width" ) )
+{
+    printf( "Width: %f\n", *width );
+}
+
+for ( const Json::Member& member : box )
+{
+    Json::StringView name = member.GetName();
+
+    printf( "%.*s\n", int( name.GetLength() ), name.GetText() );
+}
+```
+* An ```ObjectView``` gives its members in document order and finds them with ```Find```, ```FindBool```, ```FindNumber```, ```FindString```, ```FindArray```, ```FindObject``` and ```FindNull```. Objects of more than 16 members find a name through a sorted index.
+* An ```ArrayView``` gives its elements with ```[ index ]``` and in a range-based ```for```, and ```GetElementCount()``` counts them.
+* A ```StringView``` is a pointer and a length, without a terminating zero. A string may hold zeros, written ```\u0000``` in JSON. A ```std::string``` keeps them, while a ```String<>```, or a name in an ```ObjectMap```, cannot hold them, and validating or deserializing one fails with ```Status::kStringHoldsZero```.
+
+A document keeps everything it holds in a few large blocks, which it takes from a ```Json::BlockSource``` and hands back when it is cleared with ```Clear()```, parsed again or destroyed. Values, strings and views taken from a document are valid until then, and finding or iterating allocates nothing. A value takes 16 bytes and an object member 32, so a document of small numbers, such as ```[1,1,1]```, takes about 8 times the size of its text.
+
+The default block source uses ```operator new```. A source of your own is given to the constructor and must outlive the document. It may refuse a block by returning ```nullptr```, and the parse or edit then fails with ```Status::kAllocationRefused```: a parse leaves the document empty, and an edit leaves it as it was.
+
+## Writing, serializing and editing
+```Write``` writes a whole document into a file or an ```Array<char>```, indented by two spaces unless told otherwise:
+```cxx
+jsonStructuredData.Write( "Data/Examples/simpleRewrite.json" );
+jsonStructuredData.Write( "Data/Examples/simpleTabs.json", 1, '\t' );
+```
+```SerializeFrom``` replaces the document with what a structure serializes to, through its process rules. A NaN or an infinity fails with ```Status::kFloatInvalid``` and a name used twice in one object with ```Status::kDuplicateName```, and a failure leaves the document empty.
+```cxx
+textBox.width = 2;
+
+if ( jsonStructuredData.SerializeFrom( textBox ) == Json::Status::kOk )
+{
+    jsonStructuredData.Write( "Data/Examples/simpleModified.json" );
+}
+```
+A document can also be edited in place. Each edit is given a value of the document and builds the new value before it changes anything, so a failed edit leaves the document as it was, and the new value may be built from the value it replaces or joins.
+* ```SerializeAt( value, data )``` replaces a value.
+* ```AppendElement( array, data )``` adds an element at the end of an array.
+* ```AddMember( object, name, data )``` adds a member at the end of an object. A name the object already has fails with ```Status::kDuplicateName```.
+* ```RemoveElement( array, index )``` and ```RemoveMember( object, name )``` remove an element or a member, and fail with ```Status::kIndexOutOfRange``` or ```Status::kNameNotPresent``` when there is none.
+* ```EmptyObject( object )``` removes every member of an object.
+
+The ```data``` of an edit is anything that serializes: a number, a ```bool```, a string, an array, a structure with process rules, ```Json::Null```, or a ```Json::Value``` of this document or another, which is copied.
+```cxx
+const Json::Value& root = *jsonStructuredData.GetRoot();
+
+jsonStructuredData.AddMember( root, "depth", 0.5 );
+jsonStructuredData.SerializeAt( *root.AsObject().Find( "text" ), "Hello" );
+jsonStructuredData.RemoveMember( root, "height" );
+```
+An edit moves the elements or members of the array or object it changes, while the array or object itself stays where it is. Pointers to its elements or members, and views into them, are not valid after the edit, and a removal moves the later members down in place, so a pointer kept to one of them then points at another. Find a value again after an edit. Memory that a removal frees, or that an array or object outgrows, comes back when the document is cleared.
+
+### Serializing your own types
+A ```Serialize( Json::Node, const T& )``` function, or a ```Serialize( Json::Node ) const``` member, writes a type that has no process rules. A ```Node``` is a value being built: ```SetNull```, ```SetBool```, ```SetNumber```, ```SetString```, ```SetArray``` and ```SetObject``` give it its value, and ```AppendElement``` and ```AddMember``` give the node of a new element or member of an array or object. The first call that fails fails the whole build, so a function may check only the status of its last call:
+```cxx
+Json::Status Serialize( Json::Node node, const Point& point )
+{
+    Json::Node x;
+    Json::Node y;
+
+    node.SetArray();
+    node.AppendElement( x );
+    x.SetNumber( point.x );
+    node.AppendElement( y );
+
+    return y.SetNumber( point.y );
+}
+```
+
+## Version 3.0
+Version 3.0 replaces the value classes of 2.x with plain values read through views, and adds editing in place, ```Json::Read``` and block sources. Parsing is faster. Code that parses, validates, deserializes, serializes and writes through the ```DEFINE_JSON4C4_FUNCTIONS``` and ```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` macros needs no change. Code that reads values or defines its own functions changes as follows:
+
+| 2.x | 3.0 |
+|---|---|
+| ```GetRootJsonValue()``` | ```GetRoot()```, a ```const Value*``` |
+| ```StringValue```, ```NumberValue```, ```BoolValue```, ```NullValue```, ```ArrayValue```, ```ObjectValue``` | ```Value``` and ```GetType()```, with ```StringView```, ```ArrayView```, ```ObjectView``` and ```Member``` |
+| ```GetStringData()```, ```GetDoubleData()```, ```GetBoolData()```, ```GetJsonNullData()``` | ```AsString()```, ```AsNumber()```, ```AsBool()```, ```IsNull()``` |
+| ```GetJsonValueArrayData()```, ```AsJsonObjectValue()```, ```GetDataAsPointerTo<T>()``` | ```AsArray()```, ```AsObject()``` |
+| ```Value::name```, ```GetKey()``` | ```Member::GetName()``` |
+| ```FindValue```, ```FindMapElement``` | ```ObjectView::Find``` |
+| ```FindString```, ```FindNumber```, ```FindBool``` | the same on ```ObjectView```, where ```FindString``` gives a ```StringView``` |
+| ```FindJsonNull```, ```FindJsonValueArray```, ```FindJsonObjectValue``` | ```FindNull```, ```FindArray```, ```FindObject``` |
+| ```Value::Write``` | ```StructuredData::Write``` into an ```Array<char>```, for whole documents |
+| ```InsertAccountedMapElement```, ```RemoveAccountedMapElement```, ```PurgeAccountedMap```, ```Value::Detach``` | ```AddMember```, ```RemoveMember```, ```EmptyObject```, ```RemoveElement``` on the document |
+| ```Validate( const Value*, const T& )```, ```Deserialize( const Value*, T& )``` | ```Validate( const Value&, const T& )```, ```Deserialize( const Value&, T& )``` |
+| ```ValidateProto( value, ... )```, ```DeserializeProto( value, ... )``` | ```ValidateProto( value, path, ... )``` and ```DeserializeProto( value, path, ... )```, in ```ValidateTraced``` and ```DeserializeTraced``` |
+| ```Serialize( Value*, const T& )```, ```SerializeProto( value, ... )``` | ```Serialize( Node, const T& )```, ```SerializeProto( node, ... )``` |
+| ```MayThrow``` | ```Detail::MayThrow``` |
+| ```Status::kExpectedBeginingDoubleQuotes``` | ```Status::kExpectedBeginningDoubleQuotes``` |
+
+A ```Validate``` or ```Deserialize``` function of your own that takes a ```const Value&``` still works, and adds nothing to the path of a failure. Behaviour changes:
+* An optional member that is present must be valid as a whole. 2.x ignored a member missing inside it, so it could succeed and leave an optional array empty.
+* Strings may hold ```\u0000```, which 2.x refused with ```Status::kStringIllegalEscape```. Validating or deserializing such a string into a ```String<>``` fails with ```Status::kStringHoldsZero```.
+* ```SerializeFrom``` fails on a NaN or an infinity, which 2.x refused only when writing, and a failed ```SerializeFrom``` leaves the document empty.
+* ```kAllocationRefused```, ```kStringHoldsZero``` and ```kIndexOutOfRange``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
 
 ### Version 2.3
 * ```ParseText``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.
@@ -186,7 +304,7 @@ Json4C4 supports ```std::string```, ```std::vector```, and ```std::map``` by def
 
 ### Custom string and array data structures
 If you want to use custom string and array data structures, you have two options:
-1. Implement appropriate overloads. Look in ```C4Json.h``` and ```C4Json.cpp``` inside the code enabled by the ```JSON4C4_ENABLE_STD_SUPPORT_INTERNAL```  for an example of how this is implemented for ```std::string```, ```std::vector```, and ```std::map```, or
+1. Implement ```ValidateTraced```, ```DeserializeTraced``` and ```Serialize``` overloads for them. Look in ```C4Json.h``` and ```C4Json.cpp``` inside the code enabled by the ```JSON4C4_ENABLE_STD_SUPPORT_INTERNAL```  for an example of how this is implemented for ```std::string```, ```std::vector```, and ```std::map```, or
 2. Manually perform deserialization and populate your data accordingly. ```Example05_manual_deserialization``` demonstrates how to achieve this.
 
 
@@ -194,10 +312,10 @@ If you want to use custom string and array data structures, you have two options
 Json4C4 uses several preprocessor macros explained below.
 
 ### ```DEFINE_JSON4C4_FUNCTIONS```
-```DEFINE_JSON4C4_FUNCTIONS``` is a convenience macro that enables defining the three core functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types.
+```DEFINE_JSON4C4_FUNCTIONS``` is a convenience macro that enables defining the three core functions (```ValidateTraced```, ```DeserializeTraced```, and ```Serialize```) needed to perform the relevant operations on custom user types.
 
 ### ```DEFINE_JSON4C4_MEMBER_FUNCTIONS```
-```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` is a convenience macro that enables defining the three core *member* functions (```Validate```, ```Deserialize```, and ```Serialize```) needed to perform the relevant operations on custom user types, as part of a ```class``` or ```struct```. Its main purpose is to allow for validating, deserializing, and serializing member values that are private to the ```class``` or ```struct```.
+```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` is a convenience macro that enables defining the three core *member* functions (```ValidateTraced```, ```DeserializeTraced```, and ```Serialize```) needed to perform the relevant operations on custom user types, as part of a ```class``` or ```struct```. Its main purpose is to allow for validating, deserializing, and serializing member values that are private to the ```class``` or ```struct```.
 
 ### ```JSON4C4_DISABLE_STD_SUPPORT```
 When ```JSON4C4_DISABLE_STD_SUPPORT``` is defined, or when ```TERATHON_NO_SYSTEM``` is defined, Json4C4 will be compiled without ```std::string```, ```std::vector```, and ```std::map``` support.
@@ -209,7 +327,7 @@ The default for ```ParseOptions::maxNestingDepth```, 256 unless defined otherwis
 The defaults for ```ParseOptions::maxValueCount``` and ```ParseOptions::maxStringByteCount```, no limit (0x7FFFFFFFFFFFFFFF) unless defined otherwise.
 
 ### ```JSON4C4_MAX_FILE_SIZE```
-The largest file or text ```Parse``` and ```ParseText``` read and ```Write``` produces, 0x7FFFFF00 bytes unless defined lower. A longer text fails with ```Status::kFileTooLarge```.
+The largest file or text ```Parse```, ```ParseText``` and ```Read``` read and ```Write``` produces, 0x7FFFFF00 bytes unless defined lower. A longer text fails with ```Status::kFileTooLarge```.
 
 ## Third party licenses
 Third-party licenses are located in the ```Licenses``` subfolder.
