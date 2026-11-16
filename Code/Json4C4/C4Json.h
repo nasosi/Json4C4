@@ -2013,7 +2013,9 @@ namespace C4
             // A document. Everything it holds lives in blocks from its block source, which it hands back when it is
             // cleared, parsed again or destroyed. Values, strings and views taken from it are valid until then, except
             // that an edit moves the elements or members of the array or object it changes: pointers to them, and views
-            // and pointers into them, are not valid after it, while views of the edited value itself stay valid.
+            // and pointers into them, are not valid after it, while views of the edited value itself stay valid. A
+            // removal moves the later members down in place, so a pointer kept to one of them then points at another,
+            // and an edit through it changes that one; find a value again after an edit.
             class StructuredData
             {
                 friend class DocumentParser;

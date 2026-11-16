@@ -66,6 +66,24 @@ bool Holds( const V3::StructuredData& data, const char* expected )
     return ( other.ParseText( expected, strlen( expected ) ).status == Json::Status::kOk ) && ( strcmp( WriteNew( data ), WriteNew( other ) ) == 0 );
 }
 
+// Whether every member of every object in a value is found by its name, which reads the name index of a large object.
+bool FindsEveryMember( const V3::Value& value )
+{
+    bool found = true;
+
+    for ( const V3::Value& element : value.AsArray() )
+    {
+        found = found && FindsEveryMember( element );
+    }
+
+    for ( const V3::Member& member : value.AsObject() )
+    {
+        found = found && ( value.AsObject().Find( member.GetName() ) == &member.GetValue() ) && FindsEveryMember( member.GetValue() );
+    }
+
+    return found;
+}
+
 Json::Status Parse( V3::StructuredData& data, const char* text )
 {
     return data.ParseText( text, strlen( text ) ).status;
@@ -102,6 +120,23 @@ void TestMembers()
 
     CheckStatus( data.AppendElement( root, 1.0 ), Json::Status::kInvalidValueType, "append to an object" );
     CheckStatus( data.RemoveElement( root, 0 ), Json::Status::kInvalidValueType, "remove an element of an object" );
+}
+
+// Empty arrays and objects hold no room until the first addition.
+void TestEmptyContainers()
+{
+    V3::StructuredData data;
+
+    CheckStatus( Parse( data, "{ \"a\": [], \"o\": {} }" ), Json::Status::kOk, "parse an empty array and object" );
+
+    const V3::Value& root = *data.GetRoot();
+
+    CheckStatus( data.AppendElement( *root.AsObject().Find( "a" ), true ), Json::Status::kOk, "append to an empty array" );
+    CheckStatus( data.AddMember( *root.AsObject().Find( "o" ), "k", String<>( "v" ) ), Json::Status::kOk, "add to an empty object" );
+    Check( Holds( data, "{ \"a\": [ true ], \"o\": { \"k\": \"v\" } }" ) && FindsEveryMember( root ), "the first element and member" );
+    CheckStatus( data.RemoveMember( *root.AsObject().Find( "o" ), "k" ), Json::Status::kOk, "remove the only member" );
+    CheckStatus( data.RemoveElement( *root.AsObject().Find( "a" ), 0 ), Json::Status::kOk, "remove the only element" );
+    Check( Holds( data, "{ \"a\": [], \"o\": {} }" ), "empty again" );
 }
 
 void TestElements()
@@ -263,7 +298,8 @@ void TestSelfCopies()
 
     CheckStatus( data.AppendElement( *root.AsObject().Find( "list" ), *root.AsObject().Find( "list" ) ), Json::Status::kOk, "append an array to itself" );
     CheckStatus( data.AddMember( root, "copy", *root.AsObject().Find( "x" ) ), Json::Status::kOk, "add a copy of a member to its object" );
-    Check( Holds( data, "{ \"list\": [ 1, [ 2 ], [ 1, [ 2 ] ] ], \"x\": { \"y\": \"z\" }, \"copy\": { \"y\": \"z\" } }" ), "the copies" );
+    Check( Holds( data, "{ \"list\": [ 1, [ 2 ], [ 1, [ 2 ] ] ], \"x\": { \"y\": \"z\" }, \"copy\": { \"y\": \"z\" } }" ) && FindsEveryMember( root ),
+           "the copies" );
 }
 
 void TestOtherDocuments()
@@ -276,7 +312,9 @@ void TestOtherDocuments()
 
     CheckStatus( to.AddMember( *to.GetRoot(), "b", *from.GetRoot()->AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another document" );
     CheckStatus( from.RemoveMember( *from.GetRoot(), "b" ), Json::Status::kOk, "remove it from the first" );
-    Check( Holds( from, "{ \"a\": 1 }" ) && Holds( to, "{ \"x\": 0, \"b\": { \"c\": [ true, null, \"s\" ] } }" ), "a member moved between documents" );
+    Check( Holds( from, "{ \"a\": 1 }" ) && Holds( to, "{ \"x\": 0, \"b\": { \"c\": [ true, null, \"s\" ] } }" ) && FindsEveryMember( *from.GetRoot() ) &&
+               FindsEveryMember( *to.GetRoot() ),
+           "a member moved between documents" );
 
     CheckStatus( to.RemoveMember( *from.GetRoot(), "a" ), Json::Status::kInvalidValueType, "a value of another document is refused" );
     CheckStatus( to.SerializeAt( *from.GetRoot(), 1.0 ), Json::Status::kInvalidValueType, "replacing a value of another document is refused" );
@@ -360,6 +398,8 @@ bool RunEdits( CountingSource& source, int& refusedEdits )
         {
             same = status == Json::Status::kOk;
         }
+
+        same = same && FindsEveryMember( root );
     }
 
     return same;
@@ -397,6 +437,7 @@ int main()
 {
     TestMembers();
     TestElements();
+    TestEmptyContainers();
     TestCrossingSixteen();
     TestSelfCopies();
     TestOtherDocuments();
