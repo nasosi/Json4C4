@@ -245,6 +245,7 @@ namespace C4
         // Basic Types :
         // String<>
         // double
+        // float
         // bool
         // and:
         struct Null
@@ -446,6 +447,12 @@ namespace C4
                 return ( type == Type::kNumber ) && integer;
             }
 
+            // A number built from a float, which is written as a float, 0.1f as 0.1. Parsed numbers are not.
+            bool IsFloat() const noexcept
+            {
+                return ( type == Type::kNumber ) && single;
+            }
+
             const bool* AsBool() const noexcept
             {
                 return ( type == Type::kBool ) ? &data.boolean : nullptr;
@@ -477,6 +484,7 @@ namespace C4
             Type   type          = Type::kNull;
             bool   integer       = false;
             uint8  capacityShift = 0; // an edited array or object holds room for 1 << capacityShift
+            bool   single        = false;
             uint32 count         = 0;
             Data   data          = {};
 
@@ -866,6 +874,36 @@ namespace C4
             data = *number;
 
             return Status::kOk;
+        }
+
+        namespace Detail
+        {
+            // Doubles below it round to a finite float. The shortest text of FLT_MAX reads back a little above FLT_MAX.
+            constexpr double floatLimit = 0x1.ffffffp127;
+        } // namespace Detail
+
+        inline Status ValidateTraced( const Value& value, const float&, ReadPath& ) noexcept
+        {
+            const double* number = value.AsNumber();
+
+            if ( !number )
+            {
+                return Status::kInvalidValueType;
+            }
+
+            return ( ( *number > -Detail::floatLimit ) && ( *number < Detail::floatLimit ) ) ? Status::kOk : Status::kFloatInvalid;
+        }
+
+        inline Status DeserializeTraced( const Value& value, float& data, ReadPath& path ) noexcept
+        {
+            Status status = ValidateTraced( value, data, path );
+
+            if ( status == Status::kOk )
+            {
+                data = float( *value.AsNumber() );
+            }
+
+            return status;
         }
 
         inline Status ValidateTraced( const Value& value, const bool&, ReadPath& ) noexcept
@@ -1519,6 +1557,7 @@ namespace C4
             TERATHON_API Status SetNull() noexcept;
             TERATHON_API Status SetBool( bool value ) noexcept;
             TERATHON_API Status SetNumber( double value ) noexcept;
+            TERATHON_API Status SetFloat( float value ) noexcept;
             TERATHON_API Status SetString( const char* text, uint32 length ) noexcept;
 
             // Opening the array or object a node already is does nothing, so that structures can share one object.
@@ -1545,6 +1584,11 @@ namespace C4
         inline Status Serialize( Node node, double data ) noexcept
         {
             return node.SetNumber( data );
+        }
+
+        inline Status Serialize( Node node, float data ) noexcept
+        {
+            return node.SetFloat( data );
         }
 
         inline Status Serialize( Node node, bool data ) noexcept

@@ -2401,7 +2401,21 @@ namespace C4
             return result;
         }
 
-        // Writes what the 2.x Write writes for the same values.
+        // Writes a float in its shortest form, unless that form, read as a double as the parser reads it, narrows to
+        // another float. The float is then written as a double. Of all floats, only 7.038531e-26 and its negative need
+        // it.
+        inline ntt_i32 WriteFloat( float number, char* text ) noexcept
+        {
+            ntt_i32     length = ntt_write_f32( number, text );
+            double      read   = 0;
+            const char* stop   = nullptr;
+
+            ntt_parse_json_f64( text, text + length, &read, &stop );
+
+            return ( float( read ) == number ) ? length : ntt_write_f64( number, text );
+        }
+
+        // Writes what 2.3.0 wrote for the same values.
         class Writer
         {
         public:
@@ -2423,7 +2437,7 @@ namespace C4
                         return AppendText( output, *value.AsBool() ? "true" : "false" );
 
                     case Type::kNumber:
-                        return WriteNumber( *value.AsNumber() );
+                        return WriteNumber( *value.AsNumber(), value.IsFloat() );
 
                     case Type::kString:
                     {
@@ -2453,7 +2467,7 @@ namespace C4
                 return ( length > JSON4C4_MAX_FILE_SIZE ) ? Status::kFileTooLarge : ExpandArray( output, indentationChar, uint32( length ) );
             }
 
-            Status WriteNumber( double number )
+            Status WriteNumber( double number, bool single )
             {
                 if ( !( number >= -maxDouble && number <= maxDouble ) )
                 {
@@ -2462,7 +2476,7 @@ namespace C4
 
                 char text[ NUMBERTEXTTHREE_F64_MAX_CHARS ];
 
-                return AppendText( output, text, ntt_write_f64( number, text ) );
+                return AppendText( output, text, single ? WriteFloat( float( number ), text ) : ntt_write_f64( number, text ) );
             }
 
             Status WriteArray( const ArrayView& array, uint32 depth )
@@ -2898,7 +2912,7 @@ namespace C4
             }
         }
 
-        // Whether the writer writes a number with neither a fraction nor an exponent.
+        // Whether the writer writes a number with neither a fraction nor an exponent, as a double or as a float.
         inline bool IsIntegerNumber( double number ) noexcept
         {
             if ( !( ( number > -1e21 ) && ( number < 1e21 ) ) )
@@ -3000,7 +3014,7 @@ namespace C4
             }
 
             // A number that cannot be written is refused, so that a built document can always be written.
-            Status SetNumber( uint64 value, double number ) noexcept
+            Status SetNumber( uint64 value, double number, bool single ) noexcept
             {
                 if ( !( number >= -maxDouble && number <= maxDouble ) )
                 {
@@ -3011,6 +3025,7 @@ namespace C4
 
                 scalar.type        = Type::kNumber;
                 scalar.integer     = IsIntegerNumber( number );
+                scalar.single      = single;
                 scalar.data.number = number;
 
                 return SetScalar( value, scalar );
@@ -3192,7 +3207,12 @@ namespace C4
 
         Status Node::SetNumber( double value ) noexcept
         {
-            return builder ? builder->Record( builder->SetNumber( offset, value ) ) : Status::kInvalidValueType;
+            return builder ? builder->Record( builder->SetNumber( offset, value, false ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::SetFloat( float value ) noexcept
+        {
+            return builder ? builder->Record( builder->SetNumber( offset, value, true ) ) : Status::kInvalidValueType;
         }
 
         Status Node::SetString( const char* text, uint32 length ) noexcept
@@ -3253,7 +3273,7 @@ namespace C4
                     return node.SetBool( *value.AsBool() );
 
                 case Type::kNumber:
-                    return node.SetNumber( *value.AsNumber() );
+                    return value.IsFloat() ? node.SetFloat( float( *value.AsNumber() ) ) : node.SetNumber( *value.AsNumber() );
 
                 case Type::kString:
                     return node.SetString( value.AsString().GetText(), value.AsString().GetLength() );

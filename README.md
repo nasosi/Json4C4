@@ -126,8 +126,10 @@ auto parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json", option
 ### Numbers
 Numbers are read correctly rounded and written in the shortest form that reads back to the same value, with the same results in every build and locale. Values from 1e-6 up to 1e21 are written as plain decimals and others in exponent form, for example ```1e+21``` and ```1e-7```.
 
+A ```float``` is written in its shortest form, so ```0.1f``` is written as ```0.1``` rather than ```0.10000000149011612```, and every ```float``` written reads back into a ```float``` as the same ```float```. A number is read into a ```float``` through a ```double```, which rounds it twice: the shortest form of ```7.038531e-26f``` would read back as the next ```float```, so that one is written as a ```double```, and a longer number written elsewhere can, rarely, read one step away from the nearest ```float```. A number beyond the range of ```float``` fails to validate or deserialize into one with ```Status::kFloatInvalid```.
+
 ## Documents and values
-A ```Json::StructuredData``` holds a document, and ```GetRoot()``` gives its root ```Json::Value```, or ```nullptr``` when it holds none. A ```Value``` tells its type with ```GetType()``` and gives its contents with ```AsBool()```, ```AsNumber()```, ```AsString()```, ```AsArray()``` and ```AsObject()```, which give ```nullptr``` or an empty view for a value of another type. ```IsNull()``` tests for ```null``` and ```IsInteger()``` for a number written without a fraction or an exponent.
+A ```Json::StructuredData``` holds a document, and ```GetRoot()``` gives its root ```Json::Value```, or ```nullptr``` when it holds none. A ```Value``` tells its type with ```GetType()``` and gives its contents with ```AsBool()```, ```AsNumber()```, ```AsString()```, ```AsArray()``` and ```AsObject()```, which give ```nullptr``` or an empty view for a value of another type. ```IsNull()``` tests for ```null```, ```IsInteger()``` for a number written without a fraction or an exponent, and ```IsFloat()``` for a number built from a ```float```.
 ```cxx
 Json::ObjectView box = jsonStructuredData.GetRoot()->AsObject();
 
@@ -184,7 +186,7 @@ jsonStructuredData.RemoveMember( root, "height" );
 An edit moves the elements or members of the array or object it changes, while the array or object itself stays where it is. Pointers to its elements or members, and views into them, are not valid after the edit, and a removal moves the later members down in place, so a pointer kept to one of them then points at another. Find a value again after an edit. Memory that a removal frees, or that an array or object outgrows, comes back when the document is cleared.
 
 ### Serializing your own types
-A ```Serialize( Json::Node, const T& )``` function, or a ```Serialize( Json::Node ) const``` member, writes a type that has no process rules. A ```Node``` is a value being built: ```SetNull```, ```SetBool```, ```SetNumber```, ```SetString```, ```SetArray``` and ```SetObject``` give it its value, and ```AppendElement``` and ```AddMember``` give the node of a new element or member of an array or object. The first call that fails fails the whole build, so a function may check only the status of its last call:
+A ```Serialize( Json::Node, const T& )``` function, or a ```Serialize( Json::Node ) const``` member, writes a type that has no process rules. A ```Node``` is a value being built: ```SetNull```, ```SetBool```, ```SetNumber```, ```SetFloat```, ```SetString```, ```SetArray``` and ```SetObject``` give it its value, and ```AppendElement``` and ```AddMember``` give the node of a new element or member of an array or object. The first call that fails fails the whole build, so a function may check only the status of its last call:
 ```cxx
 Json::Status Serialize( Json::Node node, const Point& point )
 {
@@ -200,8 +202,9 @@ Json::Status Serialize( Json::Node node, const Point& point )
 }
 ```
 
-## Version 3.0
-Version 3.0 replaces the value classes of 2.x with plain values read through views, and adds editing in place, ```Json::Read``` and block sources. Parsing is faster. Code that parses, validates, deserializes, serializes and writes through the ```DEFINE_JSON4C4_FUNCTIONS``` and ```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` macros needs no change. Code that reads values or defines its own functions changes as follows:
+## Versions
+### Version 3.0
+Version 3.0 replaces the value classes of 2.x with plain values read through views, and adds editing in place, ```Json::Read```, block sources and ```float``` members written in their shortest form. Parsing is faster. Code that parses, validates, deserializes, serializes and writes through the ```DEFINE_JSON4C4_FUNCTIONS``` and ```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` macros needs no change. Code that reads values or defines its own functions changes as follows:
 
 | 2.x | 3.0 |
 |---|---|
