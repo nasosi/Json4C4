@@ -25,7 +25,7 @@ function( Json4C4AddTest testName )
     endif()
 
     if ( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" )
-        target_compile_options( ${testName} PRIVATE -Wno-error=stringop-overflow )
+        target_compile_options( ${testName} PRIVATE -Wno-error=stringop-overflow -Wno-error=mismatched-new-delete )
     endif()
 
     add_test( NAME ${testName} COMMAND $<TARGET_FILE:${testName}> WORKING_DIRECTORY ${Json4C4TestsWorkingDirectory} )
