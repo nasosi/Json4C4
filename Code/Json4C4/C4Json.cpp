@@ -2898,249 +2898,96 @@ namespace C4
                 uint64       size     = 0;
             };
 
-            // Reads a text into a document. Each array and object collects its elements or members on the stack and
-            // copies them into the document once, at their exact count, when it closes.
-            class DocumentParser : public TextReader
+            struct PendingMember
+            {
+                Member      member;
+                const char* nameStart;
+            };
+
+            // The elements and members of the arrays and objects being parsed or built. Each array and object collects them
+            // on a stack in blocks from the document's block source and copies them into the document once, at their exact
+            // count, when it closes.
+            class PendingValues
             {
             public:
-                DocumentParser( StructuredData& data, const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
-                    TextReader( begin, textEnd, parseOptions, true ),
-                    document( data ),
-                    stack( *data.blockSource )
+                explicit PendingValues( StructuredData& data ) noexcept : document( data ), stack( *data.blockSource )
                 {
                 }
 
-                Status ParseValue( Value& value, const char*& text, int32 depth ) noexcept
+                uint64 GetSize() const noexcept
                 {
-                    uint32 c = Peek( text );
-
-                    if ( ( c == '[' ) || ( c == '{' ) )
-                    {
-                        if ( depth >= options.maxNestingDepth )
-                        {
-                            return Status::kMaximumNestingDepthExceeded;
-                        }
-                    }
-                    else if ( ( c != '"' ) && ( c != 't' ) && ( c != 'f' ) && ( c != 'n' ) && ( c != '-' ) && !IsDigit( c ) )
-                    {
-                        return Status::kExpectedJsonValue;
-                    }
-
-                    Status status = CountValue();
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    switch ( c )
-                    {
-                        case '"':
-                        {
-                            StringView string;
-
-                            status          = ParseString( string, text );
-                            value.type      = Type::kString;
-                            value.count     = string.GetLength();
-                            value.data.text = string.GetText();
-
-                            return status;
-                        }
-
-                        case 't':
-                        case 'f':
-                            value.type = Type::kBool;
-                            return ReadBool( value.data.boolean, text );
-
-                        case 'n':
-                            value.type = Type::kNull;
-                            return ReadNull( text );
-
-                        case '[':
-                            return ParseArray( value, text, depth + 1 );
-
-                        case '{':
-                            return ParseObject( value, text, depth + 1 );
-
-                        default:
-                        {
-                            const char* number = text;
-
-                            status        = ReadNumber( value.data.number, text );
-                            value.type    = Type::kNumber;
-                            value.integer = IsIntegerText( number, text );
-
-                            return status;
-                        }
-                    }
+                    return stack.GetSize();
                 }
 
-            private:
-                struct PendingMember
+                uint32 GetMemberCount( uint64 base ) const noexcept
                 {
-                    Member      member;
-                    const char* nameStart;
-                };
+                    return uint32( ( stack.GetSize() - base ) / sizeof( PendingMember ) );
+                }
 
-                struct NamedPosition
+                template <class T>
+                T* At( uint64 offset ) noexcept
                 {
-                    const char* name;
-                    uint32      length;
-                    uint32      position;
-                };
+                    return stack.At<T>( offset );
+                }
 
-                StructuredData& document;
-                ScratchStack    stack;
-
-                Status ParseString( StringView& string, const char*& text ) noexcept
+                template <class T>
+                bool Push( const T& item ) noexcept
                 {
-                    if ( Peek( text ) != '"' )
+                    return stack.Push( item );
+                }
+
+                int32 FindName( uint64 base, const StringView& name ) noexcept
+                {
+                    const PendingMember* pending = stack.At<PendingMember>( base );
+                    uint32               count   = GetMemberCount( base );
+
+                    for ( uint32 a = 0; a < count; a++ )
                     {
-                        return Status::kExpectedBeginingDoubleQuotes;
+                        if ( SameName( pending[ a ].member.name, name ) )
+                        {
+                            return int32( a );
+                        }
                     }
 
-                    int32 textLength;
-                    int32 stringLength;
+                    return -1;
+                }
 
-                    Status status = ReadStringLiteral( text + 1, &textLength, &stringLength );
-                    if ( status != Status::kOk )
+                Status CloseArray( Value& array, uint64 base ) noexcept
+                {
+                    uint32 count    = uint32( ( stack.GetSize() - base ) / sizeof( Value ) );
+                    Value* elements = nullptr;
+
+                    if ( count != 0 )
                     {
-                        text += textLength + 1;
-                        return status;
-                    }
+                        elements = static_cast<Value*>( document.AllocateAligned( uint64( count ) * sizeof( Value ) ) );
 
-                    status = CountStringBytes( stringLength );
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    text++;
-
-                    const char* bytes = "";
-
-                    if ( stringLength != 0 )
-                    {
-                        char* stored = document.AllocateBytes( uint64( stringLength ) );
-                        if ( !stored )
+                        if ( !elements )
                         {
                             return Status::kAllocationRefused;
                         }
 
-                        if ( stringLength == textLength )
-                        {
-                            CopyText( stored, text, stringLength );
-                        }
-                        else
-                        {
-                            ReadStringLiteral( text, &textLength, &stringLength, stored );
-                        }
-
-                        bytes = stored;
+                        CopyWords( elements, stack.At<Value>( base ), uint64( count ) * sizeof( Value ) );
                     }
 
-                    text += textLength + 1;
-                    string = StringView( bytes, uint32( stringLength ) );
-
-                    return Status::kOk;
-                }
-
-                Status ParseArray( Value& array, const char*& text, int32 depth ) noexcept
-                {
-                    uint64 base   = stack.GetSize();
-                    Status status = ParseElements( text, depth );
-
-                    if ( status == Status::kOk )
-                    {
-                        uint32 count    = uint32( ( stack.GetSize() - base ) / sizeof( Value ) );
-                        Value* elements = nullptr;
-
-                        if ( count != 0 )
-                        {
-                            elements = static_cast<Value*>( document.AllocateAligned( uint64( count ) * sizeof( Value ) ) );
-
-                            if ( elements )
-                            {
-                                CopyWords( elements, stack.At<Value>( base ), uint64( count ) * sizeof( Value ) );
-                            }
-                            else
-                            {
-                                status = Status::kAllocationRefused;
-                            }
-                        }
-
-                        array.type          = Type::kArray;
-                        array.count         = count;
-                        array.data.elements = elements;
-                    }
+                    array.type          = Type::kArray;
+                    array.count         = count;
+                    array.data.elements = elements;
 
                     stack.SetSize( base );
 
-                    return status;
-                }
-
-                Status ParseElements( const char*& text, int32 depth ) noexcept
-                {
-                    bool emptyArray = true;
-
-                    for ( ;; )
-                    {
-                        text++;
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) == ']' )
-                        {
-                            if ( !emptyArray )
-                            {
-                                return Status::kExpectedJsonValue;
-                            }
-
-                            text++;
-
-                            return Status::kOk;
-                        }
-
-                        Value  element;
-                        Status status = ParseValue( element, text, depth );
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        if ( !stack.Push( element ) )
-                        {
-                            return Status::kAllocationRefused;
-                        }
-
-                        emptyArray = false;
-
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) != ',' )
-                        {
-                            break;
-                        }
-                    }
-
-                    if ( Peek( text ) != ']' )
-                    {
-                        return Status::kExpectedClosingSquareBracketsOrComma;
-                    }
-
-                    text++;
-
                     return Status::kOk;
                 }
 
-                Status ParseObject( Value& object, const char*& text, int32 depth ) noexcept
+                // With kReject a repeated name fails, and repeated is set to where the name of the earliest repeat begins.
+                Status CloseObject( Value& object, uint64 base, DuplicateNames duplicateNames, const char*& repeated ) noexcept
                 {
-                    uint64        base   = stack.GetSize();
-                    Status        status = ParseMembers( base, text, depth );
-                    uint32        count  = uint32( ( stack.GetSize() - base ) / sizeof( PendingMember ) );
+                    uint32        count  = GetMemberCount( base );
                     const uint32* index  = nullptr;
+                    Status        status = Status::kOk;
 
-                    if ( ( status == Status::kOk ) && ( count > uint32( indexedMemberCount ) ) )
+                    if ( count > uint32( indexedMemberCount ) )
                     {
-                        status = SettleNames( base, count, index, text );
+                        status = SettleNames( base, count, index, duplicateNames, repeated );
                     }
 
                     if ( status == Status::kOk )
@@ -3153,107 +3000,16 @@ namespace C4
                     return status;
                 }
 
-                Status ParseMembers( uint64 base, const char*& text, int32 depth ) noexcept
+            private:
+                struct NamedPosition
                 {
-                    bool emptyObject = true;
+                    const char* name;
+                    uint32      length;
+                    uint32      position;
+                };
 
-                    for ( ;; )
-                    {
-                        text++;
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) == '}' )
-                        {
-                            if ( !emptyObject )
-                            {
-                                return Status::kExpectedJsonValue;
-                            }
-
-                            text++;
-
-                            return Status::kOk;
-                        }
-
-                        PendingMember pending;
-                        pending.nameStart = text;
-
-                        Status status = ParseString( pending.member.name, text );
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) != ':' )
-                        {
-                            return Status::kExpectedColon;
-                        }
-
-                        text++;
-                        text = SkipWhitespace( text );
-
-                        status = ParseValue( pending.member.value, text, depth );
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        // Past the first members, SettleNames finds the duplicate names once the object ends.
-                        uint32 count    = uint32( ( stack.GetSize() - base ) / sizeof( PendingMember ) );
-                        int32  position = ( count >= uint32( indexedMemberCount ) ) ? -1 : FindPendingName( base, count, pending.member.name );
-
-                        if ( position < 0 )
-                        {
-                            if ( !stack.Push( pending ) )
-                            {
-                                return Status::kAllocationRefused;
-                            }
-                        }
-                        else if ( options.duplicateNames == DuplicateNames::kKeepLast )
-                        {
-                            stack.At<PendingMember>( base )[ position ].member.value = pending.member.value;
-                        }
-                        else if ( options.duplicateNames == DuplicateNames::kReject )
-                        {
-                            text = pending.nameStart;
-                            return Status::kDuplicateName;
-                        }
-
-                        emptyObject = false;
-
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) != ',' )
-                        {
-                            break;
-                        }
-                    }
-
-                    if ( Peek( text ) != '}' )
-                    {
-                        return Status::kExpectedClosingCurlyBracesOrComma;
-                    }
-
-                    text++;
-
-                    return Status::kOk;
-                }
-
-                int32 FindPendingName( uint64 base, uint32 count, const StringView& name ) noexcept
-                {
-                    const PendingMember* pending = stack.At<PendingMember>( base );
-
-                    for ( uint32 a = 0; a < count; a++ )
-                    {
-                        if ( SameName( pending[ a ].member.name, name ) )
-                        {
-                            return int32( a );
-                        }
-                    }
-
-                    return -1;
-                }
+                StructuredData& document;
+                ScratchStack    stack;
 
                 // A merge sort, so that members with the same name stay in document order. Returns the array that holds
                 // the sorted names.
@@ -3291,7 +3047,7 @@ namespace C4
                 // Sorts the members of a large object by name and settles the duplicate names among them. With kReject, the
                 // duplicate reported is the earliest member whose name came before, as if each member were checked when
                 // read. The positions of the members in name order are left in index.
-                Status SettleNames( uint64 base, uint32& count, const uint32*& index, const char*& text ) noexcept
+                Status SettleNames( uint64 base, uint32& count, const uint32*& index, DuplicateNames duplicateNames, const char*& repeated ) noexcept
                 {
                     uint64 namesOffset = base + uint64( count ) * sizeof( PendingMember );
 
@@ -3326,13 +3082,13 @@ namespace C4
                             continue;
                         }
 
-                        if ( options.duplicateNames == DuplicateNames::kReject )
+                        if ( duplicateNames == DuplicateNames::kReject )
                         {
                             repeat = ( sorted[ first + 1 ].position < repeat ) ? sorted[ first + 1 ].position : repeat;
                             continue;
                         }
 
-                        uint32 kept = sorted[ ( options.duplicateNames == DuplicateNames::kKeepLast ) ? next - 1 : first ].position;
+                        uint32 kept = sorted[ ( duplicateNames == DuplicateNames::kKeepLast ) ? next - 1 : first ].position;
 
                         pending[ sorted[ first ].position ].member.value = pending[ kept ].member.value;
 
@@ -3346,7 +3102,7 @@ namespace C4
 
                     if ( repeat < count )
                     {
-                        text = pending[ repeat ].nameStart;
+                        repeated = pending[ repeat ].nameStart;
                         return Status::kDuplicateName;
                     }
 
@@ -3431,6 +3187,295 @@ namespace C4
                     object.type         = Type::kObject;
                     object.count        = count;
                     object.data.members = members;
+
+                    return Status::kOk;
+                }
+            };
+
+            // Reads a text into a document.
+            class DocumentParser : public TextReader
+            {
+            public:
+                DocumentParser( StructuredData& data, const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
+                    TextReader( begin, textEnd, parseOptions, true ),
+                    document( data ),
+                    children( data )
+                {
+                }
+
+                Status ParseValue( Value& value, const char*& text, int32 depth ) noexcept
+                {
+                    uint32 c = Peek( text );
+
+                    if ( ( c == '[' ) || ( c == '{' ) )
+                    {
+                        if ( depth >= options.maxNestingDepth )
+                        {
+                            return Status::kMaximumNestingDepthExceeded;
+                        }
+                    }
+                    else if ( ( c != '"' ) && ( c != 't' ) && ( c != 'f' ) && ( c != 'n' ) && ( c != '-' ) && !IsDigit( c ) )
+                    {
+                        return Status::kExpectedJsonValue;
+                    }
+
+                    Status status = CountValue();
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    switch ( c )
+                    {
+                        case '"':
+                        {
+                            StringView string;
+
+                            status          = ParseString( string, text );
+                            value.type      = Type::kString;
+                            value.count     = string.GetLength();
+                            value.data.text = string.GetText();
+
+                            return status;
+                        }
+
+                        case 't':
+                        case 'f':
+                            value.type = Type::kBool;
+                            return ReadBool( value.data.boolean, text );
+
+                        case 'n':
+                            value.type = Type::kNull;
+                            return ReadNull( text );
+
+                        case '[':
+                            return ParseArray( value, text, depth + 1 );
+
+                        case '{':
+                            return ParseObject( value, text, depth + 1 );
+
+                        default:
+                        {
+                            const char* number = text;
+
+                            status        = ReadNumber( value.data.number, text );
+                            value.type    = Type::kNumber;
+                            value.integer = IsIntegerText( number, text );
+
+                            return status;
+                        }
+                    }
+                }
+
+            private:
+                StructuredData& document;
+                PendingValues   children;
+
+                Status ParseString( StringView& string, const char*& text ) noexcept
+                {
+                    if ( Peek( text ) != '"' )
+                    {
+                        return Status::kExpectedBeginingDoubleQuotes;
+                    }
+
+                    int32 textLength;
+                    int32 stringLength;
+
+                    Status status = ReadStringLiteral( text + 1, &textLength, &stringLength );
+                    if ( status != Status::kOk )
+                    {
+                        text += textLength + 1;
+                        return status;
+                    }
+
+                    status = CountStringBytes( stringLength );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    text++;
+
+                    const char* bytes = "";
+
+                    if ( stringLength != 0 )
+                    {
+                        char* stored = document.AllocateBytes( uint64( stringLength ) );
+                        if ( !stored )
+                        {
+                            return Status::kAllocationRefused;
+                        }
+
+                        if ( stringLength == textLength )
+                        {
+                            CopyText( stored, text, stringLength );
+                        }
+                        else
+                        {
+                            ReadStringLiteral( text, &textLength, &stringLength, stored );
+                        }
+
+                        bytes = stored;
+                    }
+
+                    text += textLength + 1;
+                    string = StringView( bytes, uint32( stringLength ) );
+
+                    return Status::kOk;
+                }
+
+                Status ParseArray( Value& array, const char*& text, int32 depth ) noexcept
+                {
+                    uint64 base   = children.GetSize();
+                    Status status = ParseElements( text, depth );
+
+                    return ( status == Status::kOk ) ? children.CloseArray( array, base ) : status;
+                }
+
+                Status ParseElements( const char*& text, int32 depth ) noexcept
+                {
+                    bool emptyArray = true;
+
+                    for ( ;; )
+                    {
+                        text++;
+                        text = SkipWhitespace( text );
+
+                        if ( Peek( text ) == ']' )
+                        {
+                            if ( !emptyArray )
+                            {
+                                return Status::kExpectedJsonValue;
+                            }
+
+                            text++;
+
+                            return Status::kOk;
+                        }
+
+                        Value  element;
+                        Status status = ParseValue( element, text, depth );
+                        if ( status != Status::kOk )
+                        {
+                            return status;
+                        }
+
+                        if ( !children.Push( element ) )
+                        {
+                            return Status::kAllocationRefused;
+                        }
+
+                        emptyArray = false;
+
+                        text = SkipWhitespace( text );
+
+                        if ( Peek( text ) != ',' )
+                        {
+                            break;
+                        }
+                    }
+
+                    if ( Peek( text ) != ']' )
+                    {
+                        return Status::kExpectedClosingSquareBracketsOrComma;
+                    }
+
+                    text++;
+
+                    return Status::kOk;
+                }
+
+                Status ParseObject( Value& object, const char*& text, int32 depth ) noexcept
+                {
+                    uint64 base   = children.GetSize();
+                    Status status = ParseMembers( base, text, depth );
+
+                    return ( status == Status::kOk ) ? children.CloseObject( object, base, options.duplicateNames, text ) : status;
+                }
+
+                Status ParseMembers( uint64 base, const char*& text, int32 depth ) noexcept
+                {
+                    bool emptyObject = true;
+
+                    for ( ;; )
+                    {
+                        text++;
+                        text = SkipWhitespace( text );
+
+                        if ( Peek( text ) == '}' )
+                        {
+                            if ( !emptyObject )
+                            {
+                                return Status::kExpectedJsonValue;
+                            }
+
+                            text++;
+
+                            return Status::kOk;
+                        }
+
+                        PendingMember pending;
+                        pending.nameStart = text;
+
+                        Status status = ParseString( pending.member.name, text );
+                        if ( status != Status::kOk )
+                        {
+                            return status;
+                        }
+
+                        text = SkipWhitespace( text );
+
+                        if ( Peek( text ) != ':' )
+                        {
+                            return Status::kExpectedColon;
+                        }
+
+                        text++;
+                        text = SkipWhitespace( text );
+
+                        status = ParseValue( pending.member.value, text, depth );
+                        if ( status != Status::kOk )
+                        {
+                            return status;
+                        }
+
+                        // Past the first members, SettleNames finds the duplicate names once the object ends.
+                        int32 position =
+                            ( children.GetMemberCount( base ) >= uint32( indexedMemberCount ) ) ? -1 : children.FindName( base, pending.member.name );
+
+                        if ( position < 0 )
+                        {
+                            if ( !children.Push( pending ) )
+                            {
+                                return Status::kAllocationRefused;
+                            }
+                        }
+                        else if ( options.duplicateNames == DuplicateNames::kKeepLast )
+                        {
+                            children.At<PendingMember>( base )[ position ].member.value = pending.member.value;
+                        }
+                        else if ( options.duplicateNames == DuplicateNames::kReject )
+                        {
+                            text = pending.nameStart;
+                            return Status::kDuplicateName;
+                        }
+
+                        emptyObject = false;
+
+                        text = SkipWhitespace( text );
+
+                        if ( Peek( text ) != ',' )
+                        {
+                            break;
+                        }
+                    }
+
+                    if ( Peek( text ) != '}' )
+                    {
+                        return Status::kExpectedClosingCurlyBracesOrComma;
+                    }
+
+                    text++;
 
                     return Status::kOk;
                 }
@@ -4046,6 +4091,414 @@ namespace C4
                 {
                     FindLineAndColumn( text, text + length, position, &result.errorLine, &result.errorColumn );
                 }
+            }
+
+            // Whether the writer writes a number with neither a fraction nor an exponent.
+            inline bool IsIntegerNumber( double number ) noexcept
+            {
+                if ( !( ( number > -1e21 ) && ( number < 1e21 ) ) )
+                {
+                    return false;
+                }
+
+                return ( number >= 9.0e18 ) || ( number <= -9.0e18 ) || ( double( int64( number ) ) == number );
+            }
+
+            // Builds a document as Serialize writes it. The elements and members of each array and object wait on the stack
+            // until the Serialize call that opened it returns, so that it is copied into the document once, at its exact
+            // count, as a parsed one is.
+            class Builder
+            {
+            public:
+                struct OpenContainer
+                {
+                    uint64 value;
+                    uint64 base;
+                };
+
+                StructuredData& document;
+                PendingValues   children;
+                ScratchStack    open;
+                Status          failure = Status::kOk;
+
+                explicit Builder( StructuredData& data ) noexcept : document( data ), children( data ), open( *data.blockSource )
+                {
+                }
+
+                // The first call that fails fails the build, even when the Serialize that made it goes on.
+                Status Record( Status status ) noexcept
+                {
+                    failure = ( failure == Status::kOk ) ? status : failure;
+
+                    return status;
+                }
+
+                Value& At( uint64 offset ) noexcept
+                {
+                    return *children.At<Value>( offset );
+                }
+
+                uint32 GetOpenCount() const noexcept
+                {
+                    return uint32( open.GetSize() / sizeof( OpenContainer ) );
+                }
+
+                OpenContainer* GetLastOpen() noexcept
+                {
+                    return ( open.GetSize() != 0 ) ? open.At<OpenContainer>( open.GetSize() - sizeof( OpenContainer ) ) : nullptr;
+                }
+
+                bool IsOpen( uint64 value ) noexcept
+                {
+                    const OpenContainer* containers = open.At<OpenContainer>( 0 );
+
+                    for ( uint32 a = 0; a < GetOpenCount(); a++ )
+                    {
+                        if ( containers[ a ].value == value )
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+
+                // Elements and members go only to the array or object opened last.
+                bool IsLastOpen( uint64 value, Type type ) noexcept
+                {
+                    const OpenContainer* last = GetLastOpen();
+
+                    return last && ( last->value == value ) && ( At( value ).type == type );
+                }
+
+                // A node that is an open array or object takes no other value.
+                Status SetScalar( uint64 value, const Value& scalar ) noexcept
+                {
+                    if ( IsOpen( value ) )
+                    {
+                        return Status::kInvalidValueType;
+                    }
+
+                    At( value ) = scalar;
+
+                    return Status::kOk;
+                }
+
+                Status SetBool( uint64 value, bool boolean ) noexcept
+                {
+                    Value scalar;
+
+                    scalar.type         = Type::kBool;
+                    scalar.data.boolean = boolean;
+
+                    return SetScalar( value, scalar );
+                }
+
+                // A number that cannot be written is refused, so that a built document can always be written.
+                Status SetNumber( uint64 value, double number ) noexcept
+                {
+                    if ( !( number >= -maxDouble && number <= maxDouble ) )
+                    {
+                        return Status::kFloatInvalid;
+                    }
+
+                    Value scalar;
+
+                    scalar.type        = Type::kNumber;
+                    scalar.integer     = IsIntegerNumber( number );
+                    scalar.data.number = number;
+
+                    return SetScalar( value, scalar );
+                }
+
+                Status SetString( uint64 value, const char* text, uint32 length ) noexcept
+                {
+                    Value  scalar;
+                    Status status = CopyText( text, length, scalar.data.text );
+
+                    scalar.type  = Type::kString;
+                    scalar.count = length;
+
+                    return ( status == Status::kOk ) ? SetScalar( value, scalar ) : status;
+                }
+
+                Status Open( uint64 value, Type type ) noexcept
+                {
+                    if ( IsOpen( value ) )
+                    {
+                        return IsLastOpen( value, type ) ? Status::kOk : Status::kInvalidValueType;
+                    }
+
+                    if ( !open.Push( OpenContainer { value, children.GetSize() } ) )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    Value& container = At( value );
+                    container        = Value();
+                    container.type   = type;
+
+                    return Status::kOk;
+                }
+
+                Status AppendElement( uint64 array, uint64& element ) noexcept
+                {
+                    if ( !IsLastOpen( array, Type::kArray ) )
+                    {
+                        return Status::kInvalidValueType;
+                    }
+
+                    if ( !children.Push( Value() ) )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    element = children.GetSize() - sizeof( Value );
+
+                    return Status::kOk;
+                }
+
+                Status AddMember( uint64 object, const char* name, uint32 length, uint64& member ) noexcept
+                {
+                    if ( !IsLastOpen( object, Type::kObject ) )
+                    {
+                        return Status::kInvalidValueType;
+                    }
+
+                    const char* copy;
+                    Status      status = CopyText( name, length, copy );
+
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    PendingMember pending;
+
+                    pending.member.name = StringView( copy, length );
+                    pending.nameStart   = nullptr;
+
+                    if ( !children.Push( pending ) )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    uint64         pendingOffset = children.GetSize() - sizeof( PendingMember );
+                    PendingMember* pushed        = children.At<PendingMember>( pendingOffset );
+
+                    member = pendingOffset + uint64( reinterpret_cast<char*>( &pushed->member.value ) - reinterpret_cast<char*>( pushed ) );
+
+                    return Status::kOk;
+                }
+
+                Status CloseSince( uint32 openCount ) noexcept
+                {
+                    while ( GetOpenCount() > openCount )
+                    {
+                        OpenContainer container = *GetLastOpen();
+                        Value         closed;
+                        Status        status;
+
+                        open.SetSize( open.GetSize() - sizeof( OpenContainer ) );
+
+                        if ( At( container.value ).type == Type::kArray )
+                        {
+                            status = children.CloseArray( closed, container.base );
+                        }
+                        else
+                        {
+                            status = CloseObject( closed, container.base );
+                        }
+
+                        if ( status != Status::kOk )
+                        {
+                            return status;
+                        }
+
+                        At( container.value ) = closed;
+                    }
+
+                    return Status::kOk;
+                }
+
+            private:
+                Status CopyText( const char* text, uint32 length, const char*& copy ) noexcept
+                {
+                    copy = "";
+
+                    if ( length != 0 )
+                    {
+                        char* stored = document.AllocateBytes( length );
+
+                        if ( !stored )
+                        {
+                            return Status::kAllocationRefused;
+                        }
+
+                        for ( uint32 a = 0; a < length; a++ )
+                        {
+                            stored[ a ] = text[ a ];
+                        }
+
+                        copy = stored;
+                    }
+
+                    return Status::kOk;
+                }
+
+                // The parser finds a repeated name among the first members of an object as it reads them, and the builder
+                // when the object closes.
+                Status CloseObject( Value& object, uint64 base ) noexcept
+                {
+                    uint32 count = children.GetMemberCount( base );
+
+                    if ( count <= uint32( indexedMemberCount ) )
+                    {
+                        const PendingMember* pending = children.At<PendingMember>( base );
+
+                        for ( uint32 a = 1; a < count; a++ )
+                        {
+                            for ( uint32 b = 0; b < a; b++ )
+                            {
+                                if ( SameName( pending[ a ].member.name, pending[ b ].member.name ) )
+                                {
+                                    return Status::kDuplicateName;
+                                }
+                            }
+                        }
+                    }
+
+                    const char* repeated = nullptr;
+
+                    return children.CloseObject( object, base, DuplicateNames::kReject, repeated );
+                }
+            };
+
+            // A node that was never given, or that AppendElement or AddMember failed to give, has no builder.
+            Status Node::SetNull() noexcept
+            {
+                return builder ? builder->Record( builder->SetScalar( offset, Value() ) ) : Status::kInvalidValueType;
+            }
+
+            Status Node::SetBool( bool value ) noexcept
+            {
+                return builder ? builder->Record( builder->SetBool( offset, value ) ) : Status::kInvalidValueType;
+            }
+
+            Status Node::SetNumber( double value ) noexcept
+            {
+                return builder ? builder->Record( builder->SetNumber( offset, value ) ) : Status::kInvalidValueType;
+            }
+
+            Status Node::SetString( const char* text, uint32 length ) noexcept
+            {
+                return builder ? builder->Record( builder->SetString( offset, text, length ) ) : Status::kInvalidValueType;
+            }
+
+            Status Node::SetArray() noexcept
+            {
+                return builder ? builder->Record( builder->Open( offset, Type::kArray ) ) : Status::kInvalidValueType;
+            }
+
+            Status Node::SetObject() noexcept
+            {
+                return builder ? builder->Record( builder->Open( offset, Type::kObject ) ) : Status::kInvalidValueType;
+            }
+
+            Status Node::AppendElement( Node& element ) noexcept
+            {
+                uint64 at     = 0;
+                Status status = builder ? builder->Record( builder->AppendElement( offset, at ) ) : Status::kInvalidValueType;
+
+                element.builder = ( status == Status::kOk ) ? builder : nullptr;
+                element.offset  = at;
+
+                return status;
+            }
+
+            Status Node::AddMember( const char* name, uint32 length, Node& member ) noexcept
+            {
+                uint64 at     = 0;
+                Status status = builder ? builder->Record( builder->AddMember( offset, name, length, at ) ) : Status::kInvalidValueType;
+
+                member.builder = ( status == Status::kOk ) ? builder : nullptr;
+                member.offset  = at;
+
+                return status;
+            }
+
+            uint32 Node::GetOpenCount() const noexcept
+            {
+                return builder ? builder->GetOpenCount() : 0;
+            }
+
+            Status Node::CloseSince( uint32 openCount ) noexcept
+            {
+                return builder ? builder->Record( builder->CloseSince( openCount ) ) : Status::kInvalidValueType;
+            }
+
+            // The builder lives in a block of its own, handed back when the build ends.
+            Status StructuredData::BeginBuild( Node& rootNode ) noexcept
+            {
+                Clear();
+
+                void* memory = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
+
+                if ( !memory )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                builder = new ( memory ) Builder( *this );
+
+                if ( !builder->children.Push( Value() ) )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                rootNode.builder = builder;
+                rootNode.offset  = 0;
+
+                return Status::kOk;
+            }
+
+            Status StructuredData::EndBuild( Status status ) noexcept
+            {
+                Value* built = nullptr;
+
+                if ( builder )
+                {
+                    status = ( status == Status::kOk ) ? builder->failure : status;
+
+                    if ( status == Status::kOk )
+                    {
+                        built = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
+
+                        if ( built )
+                        {
+                            *built = builder->At( 0 );
+                        }
+                        else
+                        {
+                            status = Status::kAllocationRefused;
+                        }
+                    }
+
+                    builder->~Builder();
+                    blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
+                    builder = nullptr;
+                }
+
+                if ( status == Status::kOk )
+                {
+                    root = built;
+                }
+                else
+                {
+                    Clear();
+                }
+
+                return status;
             }
         } // namespace V3
 

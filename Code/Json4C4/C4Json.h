@@ -1765,12 +1765,17 @@ namespace C4
             class ArrayView;
             class ObjectView;
             class Member;
+            class Node;
+            class Builder;
 
             class Value
             {
                 friend class ArrayView;
                 friend class ObjectView;
                 friend class DocumentParser;
+                friend class PendingValues;
+                friend class Builder;
+                friend class Node;
 
             public:
                 Type GetType() const noexcept
@@ -1827,6 +1832,9 @@ namespace C4
             {
                 friend class ObjectView;
                 friend class DocumentParser;
+                friend class PendingValues;
+                friend class Builder;
+                friend class Node;
 
             public:
                 const StringView& GetName() const noexcept
@@ -1980,6 +1988,9 @@ namespace C4
             class StructuredData
             {
                 friend class DocumentParser;
+                friend class PendingValues;
+                friend class Builder;
+                friend class Node;
 
             public:
                 TERATHON_API explicit StructuredData( BlockSource& source = GetDefaultBlockSource() ) noexcept;
@@ -2003,6 +2014,10 @@ namespace C4
                 template <class T>
                 Status DeserializeTo( T& data ) const noexcept;
 
+                // Replaces the document with the values data serializes to. A failure leaves the document empty.
+                template <class T>
+                Status SerializeFrom( const T& data ) noexcept;
+
                 TERATHON_API void Clear() noexcept;
 
             private:
@@ -2018,10 +2033,14 @@ namespace C4
                 char*        blockEnd      = nullptr;
                 uint64       nextBlockSize = 0;
                 const Value* root          = nullptr;
+                Builder*     builder       = nullptr;
 
                 void* AllocateAligned( uint64 size ) noexcept;
                 char* AllocateBytes( uint64 size ) noexcept;
                 void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
+
+                TERATHON_API Status BeginBuild( Node& rootNode ) noexcept;
+                TERATHON_API Status EndBuild( Status status ) noexcept;
             };
 
             // The names and array indices from the root to the value at fault when a read fails, innermost first. The
@@ -2756,6 +2775,231 @@ namespace C4
 
                 return ( result.status == Status::kOk ) ? Read( text.begin(), uint64( text.GetArrayElementCount() ), data, options ) : result;
             }
+
+            class Builder;
+
+            // A value that Serialize writes into a document. It is valid while the array or object that holds it is open,
+            // which is until the Serialize call that is given it, or that adds it, returns. A call that fails fails the
+            // build, and a node that AppendElement or AddMember fails to give is left empty, so that its own calls fail.
+            class Node
+            {
+                friend class Builder;
+                friend class StructuredData;
+
+            public:
+                TERATHON_API Status SetNull() noexcept;
+                TERATHON_API Status SetBool( bool value ) noexcept;
+                TERATHON_API Status SetNumber( double value ) noexcept;
+                TERATHON_API Status SetString( const char* text, uint32 length ) noexcept;
+
+                // Opening the array or object a node already is does nothing, so that structures can share one object.
+                TERATHON_API Status SetArray() noexcept;
+                TERATHON_API Status SetObject() noexcept;
+
+                TERATHON_API Status AppendElement( Node& element ) noexcept;
+                TERATHON_API Status AddMember( const char* name, uint32 length, Node& member ) noexcept;
+
+                Status AddMember( const char* name, Node& member ) noexcept
+                {
+                    uint32 length = 0;
+
+                    while ( name[ length ] != 0 )
+                    {
+                        length++;
+                    }
+
+                    return AddMember( name, length, member );
+                }
+
+                // For SerializeValue, which closes the arrays and objects that a Serialize call opened.
+                TERATHON_API uint32 GetOpenCount() const noexcept;
+                TERATHON_API Status CloseSince( uint32 openCount ) noexcept;
+
+            private:
+                Builder* builder = nullptr;
+                uint64   offset  = 0;
+            };
+
+            inline Status Serialize( Node node, double data ) noexcept
+            {
+                return node.SetNumber( data );
+            }
+
+            inline Status Serialize( Node node, bool data ) noexcept
+            {
+                return node.SetBool( data );
+            }
+
+            inline Status Serialize( Node node, const Null& ) noexcept
+            {
+                return node.SetNull();
+            }
+
+            inline Status Serialize( Node node, const String<>& data ) noexcept
+            {
+                return node.SetString( data, uint32( data.GetStringLength() ) );
+            }
+
+            template <class T>
+            Status Serialize( Node node, const Array<T>& data ) noexcept;
+
+            template <class T>
+            Status Serialize( Node node, const ObjectMap<T>& data ) noexcept;
+
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+
+            inline Status Serialize( Node node, const std::string& data ) noexcept
+            {
+                return node.SetString( data.data(), uint32( data.size() ) );
+            }
+
+            template <class T>
+            Status Serialize( Node node, const std::vector<T>& data ) noexcept;
+
+            template <class T>
+            Status Serialize( Node node, const std::map<std::string, T>& data ) noexcept;
+
+#endif
+
+            namespace Detail
+            {
+                template <class T>
+                using SerializeMember = decltype( DeclVal<const T&>().Serialize( DeclVal<Node>() ) );
+
+                template <class T>
+                Status SerializeInto( Node node, const T& data ) noexcept
+                {
+                    if constexpr ( IsDetectedExact<Status, SerializeMember, T>::Value )
+                    {
+                        return MayThrow( [ & ]() { return data.Serialize( node ); } );
+                    }
+                    else
+                    {
+                        return MayThrow( [ & ]() { return Serialize( node, data ); } );
+                    }
+                }
+            } // namespace Detail
+
+            // Serializes through a type's member Serialize, or its free one, and closes the arrays and objects it opened.
+            template <class T>
+            Status SerializeValue( Node node, const T& data ) noexcept
+            {
+                uint32 openCount = node.GetOpenCount();
+                Status status    = Detail::SerializeInto( node, data );
+
+                return ( status == Status::kOk ) ? node.CloseSince( openCount ) : status;
+            }
+
+            template <class T>
+            Status Serialize( Node node, const Array<T>& data ) noexcept
+            {
+                Status status = node.SetArray();
+
+                for ( const T& item : data )
+                {
+                    Node element;
+
+                    status = ( status == Status::kOk ) ? node.AppendElement( element ) : status;
+                    status = ( status == Status::kOk ) ? SerializeValue( element, item ) : status;
+                }
+
+                return status;
+            }
+
+            template <class T>
+            Status Serialize( Node node, const ObjectMap<T>& data ) noexcept
+            {
+                Status status = node.SetObject();
+
+                for ( const auto* element : data )
+                {
+                    Node member;
+
+                    status = ( status == Status::kOk ) ? node.AddMember( element->name, uint32( element->name.GetStringLength() ), member ) : status;
+                    status = ( status == Status::kOk ) ? SerializeValue( member, element->data ) : status;
+                }
+
+                return status;
+            }
+
+#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+
+            template <class T>
+            Status Serialize( Node node, const std::vector<T>& data ) noexcept
+            {
+                Status status = node.SetArray();
+
+                for ( const T& item : data )
+                {
+                    Node element;
+
+                    status = ( status == Status::kOk ) ? node.AppendElement( element ) : status;
+                    status = ( status == Status::kOk ) ? SerializeValue( element, item ) : status;
+                }
+
+                return status;
+            }
+
+            template <class T>
+            Status Serialize( Node node, const std::map<std::string, T>& data ) noexcept
+            {
+                Status status = node.SetObject();
+
+                for ( const auto& element : data )
+                {
+                    Node member;
+
+                    status = ( status == Status::kOk ) ? node.AddMember( element.first.data(), uint32( element.first.size() ), member ) : status;
+                    status = ( status == Status::kOk ) ? SerializeValue( member, element.second ) : status;
+                }
+
+                return status;
+            }
+
+#endif
+
+            inline Status SerializeProto( Node ) noexcept
+            {
+                return Status::kOk;
+            }
+
+            // A structure without a name adds its members to the object that the structure around it writes.
+            template <class T, class... Args>
+            Status SerializeProto( Node node, const T& data, Args&&... args ) noexcept
+            {
+                Status status = Detail::SerializeInto( node, data );
+
+                return ( status == Status::kOk ) ? SerializeProto( node, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            template <class T, class... Args>
+            Status SerializeProto( Node node, const char* name, const T& data, Args&&... args ) noexcept
+            {
+                Node   member;
+                Status status = node.SetObject();
+
+                status = ( status == Status::kOk ) ? node.AddMember( name, member ) : status;
+                status = ( status == Status::kOk ) ? SerializeValue( member, data ) : status;
+
+                return ( status == Status::kOk ) ? SerializeProto( node, Json::Detail::Forward<Args>( args )... ) : status;
+            }
+
+            template <class T, class... Args>
+            Status SerializeProto( Node node, Json::Detail::Optional, const char* name, const T& data, Args&&... args ) noexcept
+            {
+                return SerializeProto( node, name, data, Json::Detail::Forward<Args>( args )... );
+            }
+
+            template <class T>
+            Status StructuredData::SerializeFrom( const T& data ) noexcept
+            {
+                Node   rootNode;
+                Status status = BeginBuild( rootNode );
+
+                status = ( status == Status::kOk ) ? SerializeValue( rootNode, data ) : status;
+
+                return EndBuild( status );
+            }
         } // namespace V3
 
     } // namespace Json
@@ -2869,6 +3113,11 @@ extern template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Val
     inline C4::Json::Status DeserializeTraced( const C4::Json::V3::Value& value, JSON4C4TYPE& object, C4::Json::V3::ReadPath& path ) noexcept                  \
     {                                                                                                                                                          \
         return C4::Json::V3::DeserializeProto( value, path, JSON4C4PROTO );                                                                                    \
+    }                                                                                                                                                          \
+    inline C4::Json::Status Serialize( C4::Json::V3::Node node, const JSON4C4TYPE& object ) noexcept                                                           \
+    {                                                                                                                                                          \
+        C4::Json::Status status = node.SetObject();                                                                                                            \
+        return ( status == C4::Json::Status::kOk ) ? C4::Json::V3::SerializeProto( node, JSON4C4PROTO ) : status;                                              \
     }
 
 #define DEFINE_JSON4C4_MEMBER_FUNCTIONS( JSON4C4PROTO )                                                                                                        \
@@ -2891,6 +3140,11 @@ extern template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Val
     inline C4::Json::Status DeserializeTraced( const C4::Json::V3::Value& value, C4::Json::V3::ReadPath& path ) noexcept                                       \
     {                                                                                                                                                          \
         return C4::Json::V3::DeserializeProto( value, path, JSON4C4PROTO );                                                                                    \
+    }                                                                                                                                                          \
+    inline C4::Json::Status Serialize( C4::Json::V3::Node node ) const noexcept                                                                                \
+    {                                                                                                                                                          \
+        C4::Json::Status status = node.SetObject();                                                                                                            \
+        return ( status == C4::Json::Status::kOk ) ? C4::Json::V3::SerializeProto( node, JSON4C4PROTO ) : status;                                              \
     }
 
 #if defined( _MSC_VER )
