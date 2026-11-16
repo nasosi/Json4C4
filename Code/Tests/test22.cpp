@@ -75,14 +75,13 @@ const char* const valid = R"({
   }
 })";
 
-// Writes what 2.x serializes from a manifest, so that two manifests can be compared.
+// Writes what a manifest serializes to, so that two manifests can be compared.
 String<> WriteManifest( const Manifest& manifest )
 {
-    Json::StructuredData  sd;
+    V3::StructuredData    data;
     Terathon::Array<char> text;
-    Terathon::Array<char> indentation;
 
-    if ( ( sd.SerializeFrom( manifest ) != Json::Status::kOk ) || ( sd.GetRootJsonValue()->Write( text, 2, ' ', indentation ) != Json::Status::kOk ) )
+    if ( ( data.SerializeFrom( manifest ) != Json::Status::kOk ) || ( data.Write( text ) != Json::Status::kOk ) )
     {
         return "(not serialized)";
     }
@@ -91,6 +90,10 @@ String<> WriteManifest( const Manifest& manifest )
 
     return String<>( text.begin() );
 }
+
+// The results of 2.x and of 3.0, to check against what 2.3.0 gave.
+ResultHash oldResults;
+ResultHash newResults;
 
 // Deserializes and validates a text with 2.x and with 3.0, and checks that both give the same statuses and manifests.
 void CheckSameAs2x( const char* text, const char* description )
@@ -103,6 +106,8 @@ void CheckSameAs2x( const char* text, const char* description )
     Json::Status oldParse = ParseText( oldData, text ).status;
     Json::Status newParse = newData.ParseText( text, strlen( text ) ).status;
 
+    oldResults.Add( oldParse );
+    newResults.Add( newParse );
     Check( oldParse == newParse, description );
 
     if ( oldParse != Json::Status::kOk )
@@ -114,6 +119,11 @@ void CheckSameAs2x( const char* text, const char* description )
     Json::Status newValidate    = V3::Validate( newData, newManifest );
     Json::Status oldDeserialize = oldData.DeserializeTo( oldManifest );
     Json::Status newDeserialize = newData.DeserializeTo( newManifest );
+
+    oldResults.Add( oldValidate );
+    oldResults.Add( oldDeserialize );
+    newResults.Add( newValidate );
+    newResults.Add( newDeserialize );
 
     if ( ( oldValidate != newValidate ) || ( oldDeserialize != newDeserialize ) )
     {
@@ -130,7 +140,12 @@ void CheckSameAs2x( const char* text, const char* description )
 
     if ( oldDeserialize == Json::Status::kOk )
     {
-        Check( strcmp( WriteManifest( oldManifest ), WriteManifest( newManifest ) ) == 0, description );
+        String<> oldText = WriteManifest( oldManifest );
+        String<> newText = WriteManifest( newManifest );
+
+        oldResults.Add( static_cast<const char*>( oldText ), size_t( oldText.GetStringLength() ) );
+        newResults.Add( static_cast<const char*>( newText ), size_t( newText.GetStringLength() ) );
+        Check( strcmp( oldText, newText ) == 0, description );
     }
 }
 
@@ -184,6 +199,9 @@ void TestSameAs2x()
 
     CheckSameAs2x( "{ \"file_format_version\": \"1\", \"layer\": [] }", "an array for a structure" );
     CheckSameAs2x( "[ 1 ]", "an array for the root" );
+
+    CheckHash( oldResults.Take(), 0x213AEAF2385B0095ULL, "2.x reads the manifests as 2.3.0 did" );
+    CheckHash( newResults.Take(), 0x213AEAF2385B0095ULL, "3.0 reads the manifests as 2.3.0 did" );
 }
 
 // Reads a manifest and checks the status and path, and that the position is where marker begins, offset by offset.
@@ -310,11 +328,7 @@ void TestOptionalMembers()
 {
     const char* text = "{ \"settings\": { \"scale\": 2 } }";
 
-    Holder               holder;
-    Json::StructuredData oldData;
-
-    CheckStatus( ParseText( oldData, text ).status, Json::Status::kOk, "parse an incomplete optional member" );
-    CheckStatus( oldData.DeserializeTo( holder ), Json::Status::kOk, "2.x lets an incomplete optional member pass" );
+    Holder holder;
 
     V3::ReadResult result = V3::Read( text, strlen( text ), holder );
     CheckStatus( result.status, Json::Status::kNameNotPresent, "an incomplete optional member" );

@@ -224,8 +224,12 @@ void TestSameAs2x()
     MakeShape( shape );
     CheckStatus( data.SerializeFrom( shape ), Json::Status::kOk, "serialize a structure" );
 
-    String<> written = WriteNew( data );
+    String<>   written = WriteNew( data );
+    ResultHash writtenHash;
+
+    writtenHash.Add( static_cast<const char*>( written ), size_t( written.GetStringLength() ) );
     Check( strcmp( WriteOld( shape ), written ) == 0, "2.x and 3.0 write the same text" );
+    CheckHash( writtenHash.Take(), 0x04DF0B9ACCBA6B95ULL, "3.0 writes the structure as 2.3.0 did" );
 
     // The built document and the one parsed from its text are the same, integers included.
     V3::StructuredData parsed;

@@ -145,6 +145,23 @@ bool SameText( const Terathon::Array<char>& first, const Terathon::Array<char>& 
 
 int shownMismatches = 0;
 
+// The results of 2.x and of 3.0 for the texts of a group, to check against what 2.3.0 gave.
+ResultHash oldResults;
+ResultHash newResults;
+
+// Adds a result and, for a successful parse, the text written from it.
+void AddResult( ResultHash& results, const Json::ParseResult& result, const Terathon::Array<char>& text )
+{
+    results.Add( result );
+    results.Add( text.begin(), size_t( text.GetArrayElementCount() ) );
+}
+
+void CheckResults( unsigned long long expected, const char* description )
+{
+    CheckHash( oldResults.Take(), expected, description );
+    CheckHash( newResults.Take(), expected, description );
+}
+
 // Parses the first length characters of text from an exact-size heap buffer with 2.x and with 3.0, and checks that both
 // give the same status and position, that both write the same text, and that a failed parse keeps no block.
 void CheckSameAs2x( const char* text, size_t length, const char* description, const Json::ParseOptions& options = Json::ParseOptions() )
@@ -152,10 +169,18 @@ void CheckSameAs2x( const char* text, size_t length, const char* description, co
     char* exact = static_cast<char*>( malloc( ( length != 0 ) ? length : 1 ) );
     memcpy( exact, text, length );
 
-    Json::StructuredData oldData;
-    Json::ParseResult    oldResult = oldData.ParseText( exact, length, options );
-    Json::ParseResult    newResult;
-    bool                 same;
+    Json::StructuredData  oldData;
+    Json::ParseResult     oldResult = oldData.ParseText( exact, length, options );
+    Json::ParseResult     newResult;
+    Terathon::Array<char> oldText;
+    Terathon::Array<char> newText;
+    bool                  same;
+
+    if ( oldResult.status == Json::Status::kOk )
+    {
+        Terathon::Array<char> indentation;
+        oldData.GetRootJsonValue()->Write( oldText, 2, ' ', indentation );
+    }
 
     {
         V3::StructuredData data( countingSource );
@@ -163,20 +188,18 @@ void CheckSameAs2x( const char* text, size_t length, const char* description, co
 
         same = ( oldResult.status == newResult.status ) && ( oldResult.errorLine == newResult.errorLine ) && ( oldResult.errorColumn == newResult.errorColumn );
 
-        if ( same && ( newResult.status == Json::Status::kOk ) )
+        if ( newResult.status == Json::Status::kOk )
         {
-            Terathon::Array<char> oldText;
-            Terathon::Array<char> newText;
-            Terathon::Array<char> indentation;
-
-            oldData.GetRootJsonValue()->Write( oldText, 2, ' ', indentation );
-            same = ( data.Write( newText ) == Json::Status::kOk ) && SameText( oldText, newText );
+            same = same && ( data.Write( newText ) == Json::Status::kOk ) && SameText( oldText, newText );
         }
-        else if ( newResult.status != Json::Status::kOk )
+        else
         {
             same = same && ( data.GetRoot() == nullptr ) && ( countingSource.outstandingBytes == 0 );
         }
     }
+
+    AddResult( oldResults, oldResult, oldText );
+    AddResult( newResults, newResult, newText );
 
     same = same && countingSource.AllReturned();
 
@@ -197,6 +220,31 @@ void CheckSameAs2x( const char* text, size_t length, const char* description, co
     Check( same, description );
 
     free( exact );
+}
+
+// Reads a data file without the carriage returns that a Windows checkout adds, so that every platform parses the same text.
+bool ReadDataFile( const char* fileName, Terathon::String<>& text )
+{
+    Terathon::String<>    raw;
+    Terathon::Array<char> kept;
+
+    if ( !ReadTextFile( fileName, raw ) )
+    {
+        return false;
+    }
+
+    for ( const char* c = raw; *c != 0; c++ )
+    {
+        if ( *c != '\r' )
+        {
+            kept.AppendArrayElement( *c );
+        }
+    }
+
+    kept.AppendArrayElement( 0 );
+    text = kept.begin();
+
+    return true;
 }
 
 void CheckEveryPrefix( const char* text, size_t length, const char* description )
@@ -227,9 +275,11 @@ void TestDataFiles()
     for ( const char* file : files )
     {
         Terathon::String<> text;
-        Check( ReadTextFile( file, text ), file );
+        Check( ReadDataFile( file, text ), file );
         CheckEveryPrefix( text, size_t( text.GetStringLength() ), file );
     }
+
+    CheckResults( 0xE0BAF024605F9247ULL, "every prefix of the data files" );
 
     char name[ 64 ];
 
@@ -239,11 +289,13 @@ void TestDataFiles()
 
         Terathon::String<> text;
 
-        if ( ( a != 18 ) && ReadTextFile( name, text ) )
+        if ( ( a != 18 ) && ReadDataFile( name, text ) )
         {
             CheckEveryPrefix( text, size_t( text.GetStringLength() ), name );
         }
     }
+
+    CheckResults( 0x23F90E44C78B4B54ULL, "every prefix of the json-checker failures" );
 }
 
 void TestTokensAtTheEnd()
@@ -279,6 +331,8 @@ void TestTokensAtTheEnd()
             }
         }
     }
+
+    CheckResults( 0xB0FF10388320D6E2ULL, "tokens at the end" );
 }
 
 void TestLongTails()
@@ -305,6 +359,8 @@ void TestLongTails()
     {
         CheckSameAs2x( text, size_t( text.GetStringLength() ), "a text with a long tail" );
     }
+
+    CheckResults( 0x0F83399221C5BC47ULL, "long tails" );
 }
 
 // Forty members k0 to k39, except that member 22 is named k5, members 30 and 36 are named k25, and with early set member
@@ -372,6 +428,8 @@ void TestDuplicateNames()
         many += "}";
         CheckSameAs2x( many, size_t( many.GetStringLength() ), "many repeated names", options );
     }
+
+    CheckResults( 0x2F337869320B5276ULL, "repeated names" );
 }
 
 void TestLimits()
@@ -393,6 +451,8 @@ void TestLimits()
         options.maxNestingDepth = a;
         CheckSameAs2x( text, strlen( text ), "a nesting limit", options );
     }
+
+    CheckResults( 0x03E37EF618816082ULL, "limits" );
 }
 
 // Strings and names may hold zeros, written as \u0000. A zero byte in the text is still refused.
@@ -691,20 +751,19 @@ void TestRefusedBlocks()
 void TestFiles()
 {
     {
-        V3::StructuredData   data( countingSource );
-        Json::StructuredData oldData;
+        V3::StructuredData data( countingSource );
+        V3::StructuredData reread( countingSource );
 
         CheckStatus( data.Parse( "Data/Examples/car.json" ).status, Json::Status::kOk, "parse a file" );
         CheckStatus( data.Write( "test21_car.json", 4, ' ' ), Json::Status::kOk, "write a file" );
-        CheckStatus( oldData.Parse( "test21_car.json" ).status, Json::Status::kOk, "parse the written file with 2.x" );
+        CheckStatus( reread.Parse( "test21_car.json" ).status, Json::Status::kOk, "parse the written file" );
 
-        Terathon::Array<char> oldText;
+        Terathon::Array<char> rereadText;
         Terathon::Array<char> newText;
-        Terathon::Array<char> indentation;
 
-        oldData.GetRootJsonValue()->Write( oldText, 4, ' ', indentation );
+        reread.Write( rereadText, 4, ' ' );
         data.Write( newText, 4, ' ' );
-        Check( SameText( oldText, newText ), "the written file reads back the same" );
+        Check( SameText( rereadText, newText ), "the written file reads back the same" );
 
         CheckStatus( data.Parse( "Data/Examples/missing.json" ).status, Json::Status::kFileOpenError, "a missing file" );
         Check( !data.GetRoot(), "a failed parse clears the document" );

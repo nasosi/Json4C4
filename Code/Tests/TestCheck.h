@@ -47,6 +47,104 @@ inline int TestResult()
     return 0;
 }
 
+// A hash of results, to compare them with what 2.3.0 gave once 2.x is gone. A status is hashed by its place in a list of
+// the tests' own, so that numbering Status differently does not change the hash.
+class ResultHash
+{
+public:
+    void Add( const void* bytes, size_t count )
+    {
+        const unsigned char* byte = static_cast<const unsigned char*>( bytes );
+
+        for ( size_t a = 0; a < count; a++ )
+        {
+            hash = ( hash ^ byte[ a ] ) * 0x100000001B3ULL;
+        }
+    }
+
+    void Add( unsigned int value )
+    {
+        Add( &value, sizeof( value ) );
+    }
+
+    void Add( Json::Status status )
+    {
+        static const Json::Status statuses[] = { Json::Status::kOk,
+                                                 Json::Status::kFileOpenError,
+                                                 Json::Status::kFileReadError,
+                                                 Json::Status::kFileTooLarge,
+                                                 Json::Status::kTextBufferContentsInvalid,
+                                                 Json::Status::kUnterminatedTextBuffer,
+                                                 Json::Status::kExpectedOpeningCurlyBraces,
+                                                 Json::Status::kExpectedClosingCurlyBracesOrComma,
+                                                 Json::Status::kExpectedOpeningSquareBrackets,
+                                                 Json::Status::kExpectedClosingSquareBracketsOrComma,
+                                                 Json::Status::kStringIllegalChar,
+                                                 Json::Status::kStringIllegalEscape,
+                                                 Json::Status::kExpectedColon,
+                                                 Json::Status::kExpectedBeginingDoubleQuotes,
+                                                 Json::Status::kExpectedEndingDoubleQuotes,
+                                                 Json::Status::kFloatInvalid,
+                                                 Json::Status::kExpectedTrueOrFalse,
+                                                 Json::Status::kExpectedNull,
+                                                 Json::Status::kExpectedJsonValue,
+                                                 Json::Status::kExpectedEndOfFile,
+                                                 Json::Status::kPrematureNullTerminator,
+                                                 Json::Status::kNumbersCannotHaveLeadingZeros,
+                                                 Json::Status::kInvalidStructuredData,
+                                                 Json::Status::kException,
+                                                 Json::Status::kInvalidValueType,
+                                                 Json::Status::kNameNotPresent,
+                                                 Json::Status::kMaximumNestingDepthExceeded,
+                                                 Json::Status::kDuplicateName,
+                                                 Json::Status::kFileWriteError,
+                                                 Json::Status::kMaximumValueCountExceeded,
+                                                 Json::Status::kMaximumStringByteCountExceeded,
+                                                 Json::Status::kAllocationRefused,
+                                                 Json::Status::kStringHoldsZero };
+
+        unsigned int place = 0;
+
+        while ( ( place < sizeof( statuses ) / sizeof( statuses[ 0 ] ) ) && ( statuses[ place ] != status ) )
+        {
+            place++;
+        }
+
+        Add( place );
+    }
+
+    void Add( const Json::ParseResult& result )
+    {
+        Add( result.status );
+        Add( unsigned( result.errorLine ) );
+        Add( unsigned( result.errorColumn ) );
+    }
+
+    // Returns the hash and starts a new one.
+    unsigned long long Take()
+    {
+        unsigned long long value = hash;
+        hash                     = start;
+        return value;
+    }
+
+private:
+    static constexpr unsigned long long start = 0xCBF29CE484222325ULL;
+
+    unsigned long long hash = start;
+};
+
+// Checks a hash of results against what 2.3.0 gave. With an expected value of 0 the hash is printed, to be filled in.
+inline void CheckHash( unsigned long long hash, unsigned long long expected, const char* description )
+{
+    if ( expected == 0 )
+    {
+        printf( "%s: 0x%016llXULL\n", description, hash );
+    }
+
+    Check( hash == expected, description );
+}
+
 inline Terathon::Array<char> MakeTextBuffer( const char* text, size_t length )
 {
     Terathon::Array<char> buffer;
