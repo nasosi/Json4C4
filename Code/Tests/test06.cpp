@@ -2,7 +2,7 @@
 
 int main()
 {
-    constexpr unsigned statusCount = unsigned( Json::Status::kMaximumStringByteCountExceeded ) + 1;
+    constexpr unsigned statusCount = unsigned( Json::Status::kAllocationRefused ) + 1;
 
     for ( unsigned a = 0; a < statusCount; a++ )
     {

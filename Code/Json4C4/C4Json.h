@@ -184,7 +184,8 @@ namespace C4
             kDuplicateName,
             kFileWriteError,
             kMaximumValueCountExceeded,
-            kMaximumStringByteCountExceeded
+            kMaximumStringByteCountExceeded,
+            kAllocationRefused
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -1675,6 +1676,340 @@ namespace C4
 
             return SerializeProto( value, Detail::Forward<Args>( args )... );
         }
+
+        // The 3.0 classes, built beside the 2.x classes until they replace them.
+        namespace V3
+        {
+            // Gives a document its memory. AllocateBlock returns size bytes aligned to 8 bytes, or nullptr to refuse
+            // them, and FreeBlock takes a block back with the size it was allocated with. Sizes are multiples of 8.
+            class BlockSource
+            {
+            public:
+                virtual void* AllocateBlock( uint64 size ) noexcept          = 0;
+                virtual void  FreeBlock( void* block, uint64 size ) noexcept = 0;
+
+            protected:
+                ~BlockSource() = default;
+            };
+
+            // Allocates blocks with operator new.
+            TERATHON_API BlockSource& GetDefaultBlockSource() noexcept;
+
+            enum class Type : uint8
+            {
+                kNull,
+                kBool,
+                kNumber,
+                kString,
+                kArray,
+                kObject
+            };
+
+            // Bytes and their count, without a terminating zero. A string may hold zeros.
+            class StringView
+            {
+            public:
+                StringView() = default;
+
+                StringView( const char* stringText, uint32 stringLength ) noexcept : text( stringText ), length( stringLength )
+                {
+                }
+
+                explicit operator bool() const noexcept
+                {
+                    return text != nullptr;
+                }
+
+                const char* GetText() const noexcept
+                {
+                    return text;
+                }
+
+                uint32 GetLength() const noexcept
+                {
+                    return length;
+                }
+
+                const char* begin() const noexcept
+                {
+                    return text;
+                }
+
+                const char* end() const noexcept
+                {
+                    return text + length;
+                }
+
+                TERATHON_API bool operator==( const StringView& other ) const noexcept;
+                TERATHON_API bool operator==( const char* other ) const noexcept;
+
+                bool operator!=( const StringView& other ) const noexcept
+                {
+                    return !( *this == other );
+                }
+
+                bool operator!=( const char* other ) const noexcept
+                {
+                    return !( *this == other );
+                }
+
+            private:
+                const char* text   = nullptr;
+                uint32      length = 0;
+            };
+
+            class ArrayView;
+            class ObjectView;
+            class Member;
+
+            class Value
+            {
+                friend class ArrayView;
+                friend class ObjectView;
+                friend class DocumentParser;
+
+            public:
+                Type GetType() const noexcept
+                {
+                    return type;
+                }
+
+                bool IsNull() const noexcept
+                {
+                    return type == Type::kNull;
+                }
+
+                const bool* AsBool() const noexcept
+                {
+                    return ( type == Type::kBool ) ? &data.boolean : nullptr;
+                }
+
+                const double* AsNumber() const noexcept
+                {
+                    return ( type == Type::kNumber ) ? &data.number : nullptr;
+                }
+
+                StringView AsString() const noexcept
+                {
+                    return ( type == Type::kString ) ? StringView( data.text, count ) : StringView();
+                }
+
+                inline ArrayView  AsArray() const noexcept;
+                inline ObjectView AsObject() const noexcept;
+
+            private:
+                union Data
+                {
+                    double        number;
+                    bool          boolean;
+                    const char*   text;
+                    const Value*  elements;
+                    const Member* members;
+                };
+
+                Type   type  = Type::kNull;
+                uint32 count = 0;
+                Data   data  = {};
+            };
+
+            class Member
+            {
+                friend class ObjectView;
+                friend class DocumentParser;
+
+            public:
+                const StringView& GetName() const noexcept
+                {
+                    return name;
+                }
+
+                const Value& GetValue() const noexcept
+                {
+                    return value;
+                }
+
+            private:
+                StringView name;
+                Value      value;
+            };
+
+            class ArrayView
+            {
+                friend class Value;
+
+            public:
+                ArrayView() = default;
+
+                explicit operator bool() const noexcept
+                {
+                    return array != nullptr;
+                }
+
+                uint32 GetElementCount() const noexcept
+                {
+                    return array ? array->count : 0;
+                }
+
+                const Value* begin() const noexcept
+                {
+                    return array ? array->data.elements : nullptr;
+                }
+
+                const Value* end() const noexcept
+                {
+                    return begin() + GetElementCount();
+                }
+
+                const Value& operator[]( uint32 index ) const noexcept
+                {
+                    return begin()[ index ];
+                }
+
+            private:
+                const Value* array = nullptr;
+
+                explicit ArrayView( const Value* arrayValue ) noexcept : array( arrayValue )
+                {
+                }
+            };
+
+            // Objects of more than 16 members find a name through an index of their members sorted by name, which
+            // follows the members. Smaller ones compare every name.
+            class ObjectView
+            {
+                friend class Value;
+
+            public:
+                ObjectView() = default;
+
+                explicit operator bool() const noexcept
+                {
+                    return object != nullptr;
+                }
+
+                uint32 GetMemberCount() const noexcept
+                {
+                    return object ? object->count : 0;
+                }
+
+                const Member* begin() const noexcept
+                {
+                    return object ? object->data.members : nullptr;
+                }
+
+                const Member* end() const noexcept
+                {
+                    return begin() + GetMemberCount();
+                }
+
+                TERATHON_API const Value* Find( const char* name, uint32 length ) const noexcept;
+                TERATHON_API const Value* Find( const char* name ) const noexcept;
+
+                const Value* Find( const StringView& name ) const noexcept
+                {
+                    return Find( name.GetText(), name.GetLength() );
+                }
+
+                const bool* FindBool( const char* name ) const noexcept
+                {
+                    const Value* value = Find( name );
+                    return value ? value->AsBool() : nullptr;
+                }
+
+                const double* FindNumber( const char* name ) const noexcept
+                {
+                    const Value* value = Find( name );
+                    return value ? value->AsNumber() : nullptr;
+                }
+
+                StringView FindString( const char* name ) const noexcept
+                {
+                    const Value* value = Find( name );
+                    return value ? value->AsString() : StringView();
+                }
+
+                ArrayView FindArray( const char* name ) const noexcept
+                {
+                    const Value* value = Find( name );
+                    return value ? value->AsArray() : ArrayView();
+                }
+
+                ObjectView FindObject( const char* name ) const noexcept
+                {
+                    const Value* value = Find( name );
+                    return value ? value->AsObject() : ObjectView();
+                }
+
+                bool FindNull( const char* name ) const noexcept
+                {
+                    const Value* value = Find( name );
+                    return value && value->IsNull();
+                }
+
+            private:
+                const Value* object = nullptr;
+
+                explicit ObjectView( const Value* objectValue ) noexcept : object( objectValue )
+                {
+                }
+            };
+
+            inline ArrayView Value::AsArray() const noexcept
+            {
+                return ( type == Type::kArray ) ? ArrayView( this ) : ArrayView();
+            }
+
+            inline ObjectView Value::AsObject() const noexcept
+            {
+                return ( type == Type::kObject ) ? ObjectView( this ) : ObjectView();
+            }
+
+            // A document. Everything it holds lives in blocks from its block source, which it hands back when it is
+            // cleared, parsed again or destroyed.
+            class StructuredData
+            {
+                friend class DocumentParser;
+
+            public:
+                TERATHON_API explicit StructuredData( BlockSource& source = GetDefaultBlockSource() ) noexcept;
+                TERATHON_API ~StructuredData() noexcept;
+
+                StructuredData( const StructuredData& )            = delete;
+                StructuredData& operator=( const StructuredData& ) = delete;
+
+                TERATHON_API ParseResult Parse( const char* fileName, const ParseOptions& options = ParseOptions() ) noexcept;
+                TERATHON_API ParseResult Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options = ParseOptions() ) noexcept;
+                TERATHON_API ParseResult ParseText( const char* text, uint64 length, const ParseOptions& options = ParseOptions() ) noexcept;
+
+                TERATHON_API Status Write( Array<char>& output, uint32 indentationLength = 2, char indentationChar = ' ' ) const noexcept;
+                TERATHON_API Status Write( const char* fileName, uint32 indentationLength = 2, char indentationChar = ' ' ) const noexcept;
+
+                const Value* GetRoot() const noexcept
+                {
+                    return root;
+                }
+
+                TERATHON_API void Clear() noexcept;
+
+            private:
+                struct Block
+                {
+                    Block* next;
+                    uint64 size;
+                };
+
+                BlockSource* blockSource;
+                Block*       blocks        = nullptr;
+                char*        blockTop      = nullptr;
+                char*        blockEnd      = nullptr;
+                uint64       nextBlockSize = 0;
+                const Value* root          = nullptr;
+
+                void* AllocateAligned( uint64 size ) noexcept;
+                char* AllocateBytes( uint64 size ) noexcept;
+                void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
+            };
+        } // namespace V3
 
     } // namespace Json
 } // namespace C4
