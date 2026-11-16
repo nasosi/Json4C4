@@ -168,22 +168,26 @@ if ( jsonStructuredData.SerializeFrom( textBox ) == Json::Status::kOk )
     jsonStructuredData.Write( "Data/Examples/simpleModified.json" );
 }
 ```
-A document can also be edited in place. Each edit is given a value of the document and builds the new value before it changes anything, so a failed edit leaves the document as it was, and the new value may be built from the value it replaces or joins.
-* ```SerializeAt( value, data )``` replaces a value.
-* ```AppendElement( array, data )``` adds an element at the end of an array.
-* ```AddMember( object, name, data )``` adds a member at the end of an object. A name the object already has fails with ```Status::kDuplicateName```.
-* ```RemoveElement( array, index )``` and ```RemoveMember( object, name )``` remove an element or a member, and fail with ```Status::kIndexOutOfRange``` or ```Status::kNameNotPresent``` when there is none.
-* ```EmptyObject( object )``` removes every member of an object.
+A document can also be edited in place. An edit is given a ```Json::EditHandle```, which ```Edit``` takes from a value of the document, and it builds the new value before it changes anything, so a failed edit leaves the document as it was, and the new value may be built from the value it replaces or joins.
+* ```SerializeAt( handle, data )``` replaces a value.
+* ```AppendElement( handle, data )``` adds an element at the end of an array.
+* ```AddMember( handle, name, data )``` adds a member at the end of an object. A name the object already has fails with ```Status::kDuplicateName```.
+* ```RemoveElement( handle, index )``` and ```RemoveMember( handle, name )``` remove an element or a member, and fail with ```Status::kIndexOutOfRange``` or ```Status::kNameNotPresent``` when there is none.
+* ```EmptyObject( handle )``` removes every member of an object.
 
 The ```data``` of an edit is anything that serializes: a number, a ```bool```, a string, an array, a structure with process rules, ```Json::Null```, or a ```Json::Value``` of this document or another, which is copied.
 ```cxx
-const Json::Value& root = *jsonStructuredData.GetRoot();
+const Json::Value& root   = *jsonStructuredData.GetRoot();
+Json::EditHandle   object = jsonStructuredData.Edit( root );
 
-jsonStructuredData.AddMember( root, "depth", 0.5 );
-jsonStructuredData.SerializeAt( *root.AsObject().Find( "text" ), "Hello" );
-jsonStructuredData.RemoveMember( root, "height" );
+jsonStructuredData.AddMember( object, "depth", 0.5 );
+jsonStructuredData.RemoveMember( object, "height" );
+
+Json::EditHandle text = jsonStructuredData.Edit( *root.AsObject().Find( "text" ) );
+
+jsonStructuredData.SerializeAt( text, "Hello" );
 ```
-An edit moves the elements or members of the array or object it changes, while the array or object itself stays where it is. Pointers to its elements or members, and views into them, are not valid after the edit, and a removal moves the later members down in place, so a pointer kept to one of them then points at another. Find a value again after an edit. Memory that a removal frees, or that an array or object outgrows, comes back when the document is cleared.
+An edit moves the elements or members of the array or object it changes, while the array or object itself stays where it is, so pointers to its elements or members, and views into them, are not valid after the edit. A handle is kept up to date by the edits it is given, and any other change to the document, an edit through another handle, a parse, a ```SerializeFrom``` or a ```Clear```, makes it stale: an edit through it then fails with ```Status::kStaleEditHandle```, and its ```Get()``` gives ```nullptr```. Take a handle from a value just found, since a pointer kept across an edit can point at another value. Memory that a removal frees, or that an array or object outgrows, comes back when the document is cleared.
 
 ### Serializing your own types
 A ```Serialize( Json::Node, const T& )``` function, or a ```Serialize( Json::Node ) const``` member, writes a type that has no process rules. A ```Node``` is a value being built: ```SetNull```, ```SetBool```, ```SetNumber```, ```SetFloat```, ```SetString```, ```SetArray``` and ```SetObject``` give it its value, and ```AppendElement``` and ```AddMember``` give the node of a new element or member of an array or object. The first call that fails fails the whole build, so a function may check only the status of its last call:
@@ -217,7 +221,7 @@ Version 3.0 replaces the value classes of 2.x with plain values read through vie
 | ```FindString```, ```FindNumber```, ```FindBool``` | the same on ```ObjectView```, where ```FindString``` gives a ```StringView``` |
 | ```FindJsonNull```, ```FindJsonValueArray```, ```FindJsonObjectValue``` | ```FindNull```, ```FindArray```, ```FindObject``` |
 | ```Value::Write``` | ```StructuredData::Write``` into an ```Array<char>```, for whole documents |
-| ```InsertAccountedMapElement```, ```RemoveAccountedMapElement```, ```PurgeAccountedMap```, ```Value::Detach``` | ```AddMember```, ```RemoveMember```, ```EmptyObject```, ```RemoveElement``` on the document |
+| ```InsertAccountedMapElement```, ```RemoveAccountedMapElement```, ```PurgeAccountedMap```, ```Value::Detach``` | ```AddMember```, ```RemoveMember```, ```EmptyObject```, ```RemoveElement``` on the document, through an ```EditHandle``` |
 | ```Validate( const Value*, const T& )```, ```Deserialize( const Value*, T& )``` | ```Validate( const Value&, const T& )```, ```Deserialize( const Value&, T& )``` |
 | ```ValidateProto( value, ... )```, ```DeserializeProto( value, ... )``` | ```ValidateProto( value, path, ... )``` and ```DeserializeProto( value, path, ... )```, in ```ValidateTraced``` and ```DeserializeTraced``` |
 | ```Serialize( Value*, const T& )```, ```SerializeProto( value, ... )``` | ```Serialize( Node, const T& )```, ```SerializeProto( node, ... )``` |
@@ -228,7 +232,7 @@ A ```Validate``` or ```Deserialize``` function of your own that takes a ```const
 * An optional member that is present must be valid as a whole. 2.x ignored a member missing inside it, so it could succeed and leave an optional array empty.
 * Strings may hold ```\u0000```, which 2.x refused with ```Status::kStringIllegalEscape```. Validating or deserializing such a string into a ```String<>``` fails with ```Status::kStringHoldsZero```.
 * ```SerializeFrom``` fails on a NaN or an infinity, which 2.x refused only when writing, and a failed ```SerializeFrom``` leaves the document empty.
-* ```kAllocationRefused```, ```kStringHoldsZero``` and ```kIndexOutOfRange``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
+* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange``` and ```kStaleEditHandle``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
 
 ### Version 2.3
 * ```ParseText``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.

@@ -252,8 +252,8 @@ void TestBuiltByHand()
     Json::StructuredData sd;
     CheckStatus( ParseText( sd, "{}" ).status, Json::Status::kOk, "parse an empty object" );
 
-    const Json::Value& root   = *sd.GetRoot();
-    Json::ObjectView   object = root.AsObject();
+    Json::EditHandle root   = sd.Edit( *sd.GetRoot() );
+    Json::ObjectView object = root.Get()->AsObject();
 
     for ( int a = 0; a < count; a++ )
     {

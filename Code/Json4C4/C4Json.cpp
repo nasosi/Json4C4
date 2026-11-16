@@ -609,11 +609,12 @@ namespace C4
                                                     "Maximum string byte count exceeded",
                                                     "A block source refused an allocation",
                                                     "String holds a zero character",
-                                                    "Array index out of range" };
+                                                    "Array index out of range",
+                                                    "Edit handle taken before the document changed" };
 
         constexpr unsigned int statusStringCount = sizeof( StatusString ) / sizeof( StatusString[ 0 ] );
 
-        static_assert( statusStringCount == (unsigned int)( Status::kIndexOutOfRange ) + 1, "StatusString must have one entry per Status" );
+        static_assert( statusStringCount == (unsigned int)( Status::kStaleEditHandle ) + 1, "StatusString must have one entry per Status" );
 
         TERATHON_API String<256> StatusToString( const Status& status ) noexcept
         {
@@ -1532,6 +1533,7 @@ namespace C4
             blockEnd      = nullptr;
             nextBlockSize = smallestBlockSize;
             root          = nullptr;
+            editCount++;
         }
 
         // Sizes are multiples of 8, and values, arrays and members are taken from the bottom of the free space of the
@@ -3326,16 +3328,11 @@ namespace C4
             index[ slot ] = position;
         }
 
-        // An edit is refused while a build is open, and for a value that is not of the type it needs or not in one of
-        // this document's blocks, such as a value of another document.
-        Status StructuredData::CheckEdit( const Value& target, Type type ) const noexcept
+        // A value in none of this document's blocks, such as a value of another document, gives an empty handle.
+        EditHandle StructuredData::Edit( const Value& value ) noexcept
         {
-            if ( builder || ( target.type != type ) )
-            {
-                return Status::kInvalidValueType;
-            }
-
-            machine_address address = reinterpret_cast<machine_address>( &target );
+            EditHandle      handle;
+            machine_address address = reinterpret_cast<machine_address>( &value );
 
             for ( const Block* block = blocks; block; block = block->next )
             {
@@ -3344,34 +3341,57 @@ namespace C4
 
                 if ( ( address >= start ) && ( address < end ) )
                 {
-                    return Status::kOk;
+                    handle.document = this;
+                    handle.value    = &value;
+                    handle.edit     = editCount;
+                    break;
                 }
             }
 
-            return Status::kInvalidValueType;
+            return handle;
+        }
+
+        // An edit is refused while a build is open, for a handle of another document or an empty one, for a stale
+        // handle, and for a value that is not of the type it needs.
+        Status StructuredData::CheckEdit( const EditHandle& handle ) const noexcept
+        {
+            if ( builder || ( handle.document != this ) )
+            {
+                return Status::kInvalidValueType;
+            }
+
+            return ( handle.edit == editCount ) ? Status::kOk : Status::kStaleEditHandle;
+        }
+
+        Status StructuredData::CheckEdit( const EditHandle& handle, Type type ) const noexcept
+        {
+            Status status = CheckEdit( handle );
+
+            return ( ( status == Status::kOk ) && ( handle.value->type != type ) ) ? Status::kInvalidValueType : status;
         }
 
         // The builder lives in a block of its own, handed back when the build ends.
-        Status StructuredData::BeginBuild( const Edit& edit, Node& rootNode ) noexcept
+        Status StructuredData::BeginBuild( const Change& change, Node& rootNode ) noexcept
         {
             Status status = builder ? Status::kInvalidValueType : Status::kOk;
 
-            switch ( edit.kind )
+            switch ( change.kind )
             {
-                case EditKind::kDocument:
+                case ChangeKind::kDocument:
                     break;
 
-                case EditKind::kReplace:
-                    status = CheckEdit( *edit.target, edit.target->type );
+                case ChangeKind::kReplace:
+                    status = CheckEdit( *change.handle );
                     break;
 
-                case EditKind::kAppend:
-                    status = CheckEdit( *edit.target, Type::kArray );
+                case ChangeKind::kAppend:
+                    status = CheckEdit( *change.handle, Type::kArray );
                     break;
 
-                case EditKind::kAddMember:
-                    status = CheckEdit( *edit.target, Type::kObject );
-                    status = ( ( status == Status::kOk ) && edit.target->AsObject().Find( edit.name, edit.length ) ) ? Status::kDuplicateName : status;
+                case ChangeKind::kAddMember:
+                    status = CheckEdit( *change.handle, Type::kObject );
+                    status =
+                        ( ( status == Status::kOk ) && change.handle->value->AsObject().Find( change.name, change.length ) ) ? Status::kDuplicateName : status;
                     break;
             }
 
@@ -3380,7 +3400,7 @@ namespace C4
                 return status;
             }
 
-            if ( edit.kind == EditKind::kDocument )
+            if ( change.kind == ChangeKind::kDocument )
             {
                 Clear();
             }
@@ -3401,7 +3421,7 @@ namespace C4
 
         // The edit is made only when its value is built, so that a failed edit leaves the document as it was. A failed
         // SerializeFrom leaves it empty.
-        Status StructuredData::EndBuild( const Edit& edit, const Node& rootNode, Status status ) noexcept
+        Status StructuredData::EndBuild( const Change& change, const Node& rootNode, Status status ) noexcept
         {
             if ( !rootNode.builder )
             {
@@ -3415,19 +3435,24 @@ namespace C4
             blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
             builder = nullptr;
 
-            status = ( status == Status::kOk ) ? Splice( edit, built ) : status;
+            status = ( status == Status::kOk ) ? Splice( change, built ) : status;
 
-            if ( ( status != Status::kOk ) && ( edit.kind == EditKind::kDocument ) )
+            if ( ( status != Status::kOk ) && ( change.kind == ChangeKind::kDocument ) )
             {
                 Clear();
+            }
+
+            if ( ( status == Status::kOk ) && ( change.kind != ChangeKind::kDocument ) )
+            {
+                change.handle->edit = ++editCount;
             }
 
             return status;
         }
 
-        Status StructuredData::Splice( const Edit& edit, const Value& built ) noexcept
+        Status StructuredData::Splice( const Change& change, const Value& built ) noexcept
         {
-            if ( edit.kind == EditKind::kDocument )
+            if ( change.kind == ChangeKind::kDocument )
             {
                 Value* value = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
 
@@ -3442,9 +3467,9 @@ namespace C4
                 return Status::kOk;
             }
 
-            Value& target = const_cast<Value&>( *edit.target );
+            Value& target = const_cast<Value&>( *change.handle->value );
 
-            if ( edit.kind == EditKind::kReplace )
+            if ( change.kind == ChangeKind::kReplace )
             {
                 target = built;
 
@@ -3453,18 +3478,18 @@ namespace C4
 
             const char* name = "";
 
-            if ( edit.length != 0 )
+            if ( change.length != 0 )
             {
-                char* copy = AllocateBytes( edit.length );
+                char* copy = AllocateBytes( change.length );
 
                 if ( !copy )
                 {
                     return Status::kAllocationRefused;
                 }
 
-                for ( uint32 a = 0; a < edit.length; a++ )
+                for ( uint32 a = 0; a < change.length; a++ )
                 {
-                    copy[ a ] = edit.name[ a ];
+                    copy[ a ] = change.name[ a ];
                 }
 
                 name = copy;
@@ -3475,7 +3500,7 @@ namespace C4
                 return Status::kAllocationRefused;
             }
 
-            if ( edit.kind == EditKind::kAppend )
+            if ( change.kind == ChangeKind::kAppend )
             {
                 const_cast<Value*>( target.data.elements )[ target.count++ ] = built;
 
@@ -3485,7 +3510,7 @@ namespace C4
             Member* members = const_cast<Member*>( target.data.members );
             uint32  room    = target.GetCapacity();
 
-            members[ target.count ].name  = StringView( name, edit.length );
+            members[ target.count ].name  = StringView( name, change.length );
             members[ target.count ].value = built;
 
             if ( room > uint32( indexedMemberCount ) )
@@ -3578,7 +3603,7 @@ namespace C4
             return true;
         }
 
-        Status StructuredData::RemoveElement( const Value& array, uint32 index ) noexcept
+        Status StructuredData::RemoveElement( EditHandle& array, uint32 index ) noexcept
         {
             Status status = CheckEdit( array, Type::kArray );
 
@@ -3587,12 +3612,13 @@ namespace C4
                 return status;
             }
 
-            if ( index >= array.count )
+            Value& edited = const_cast<Value&>( *array.value );
+
+            if ( index >= edited.count )
             {
                 return Status::kIndexOutOfRange;
             }
 
-            Value& edited   = const_cast<Value&>( array );
             Value* elements = const_cast<Value*>( edited.data.elements );
 
             for ( uint32 a = index + 1; a < edited.count; a++ )
@@ -3601,18 +3627,20 @@ namespace C4
             }
 
             edited.count--;
+            array.edit = ++editCount;
 
             return Status::kOk;
         }
 
         // An object keeps its room, and its index stays valid for no members.
-        Status StructuredData::EmptyObject( const Value& object ) noexcept
+        Status StructuredData::EmptyObject( EditHandle& object ) noexcept
         {
             Status status = CheckEdit( object, Type::kObject );
 
             if ( status == Status::kOk )
             {
-                const_cast<Value&>( object ).count = 0;
+                const_cast<Value&>( *object.value ).count = 0;
+                object.edit                               = ++editCount;
             }
 
             return status;
@@ -3620,7 +3648,7 @@ namespace C4
 
         // The members after the one removed move down, so that the others keep their order. An object without room to
         // spare keeps its index right after its members, so the index moves down with them.
-        Status StructuredData::RemoveMember( const Value& object, const char* name, uint32 length ) noexcept
+        Status StructuredData::RemoveMember( EditHandle& object, const char* name, uint32 length ) noexcept
         {
             Status status = CheckEdit( object, Type::kObject );
 
@@ -3634,7 +3662,7 @@ namespace C4
                 return Status::kNameNotPresent;
             }
 
-            Value&  edited   = const_cast<Value&>( object );
+            Value&  edited   = const_cast<Value&>( *object.value );
             Member* members  = const_cast<Member*>( edited.data.members );
             uint32  count    = edited.count;
             uint32  capacity = edited.GetCapacity();
@@ -3682,6 +3710,7 @@ namespace C4
             }
 
             edited.count = count - 1;
+            object.edit  = ++editCount;
 
             return Status::kOk;
         }

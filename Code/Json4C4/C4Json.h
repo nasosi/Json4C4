@@ -186,7 +186,8 @@ namespace C4
             kMaximumStringByteCountExceeded,
             kAllocationRefused,
             kStringHoldsZero,
-            kIndexOutOfRange
+            kIndexOutOfRange,
+            kStaleEditHandle
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -667,14 +668,31 @@ namespace C4
             }
         } // namespace Detail
 
+        // A value of a document to edit. An edit through it brings it up to date, and any other change to the
+        // document, an edit through another handle, a parse, a SerializeFrom or a Clear, makes it stale, so that edits
+        // through it fail with kStaleEditHandle. Take a handle from a value just found: a pointer kept across an edit
+        // can point at another value, and a handle taken from it would edit that one.
+        class EditHandle
+        {
+            friend class StructuredData;
+
+        public:
+            // The value, or nullptr once the handle is stale.
+            inline const Value* Get() const noexcept;
+
+        private:
+            const StructuredData* document = nullptr;
+            const Value*          value    = nullptr;
+            uint64                edit     = 0;
+        };
+
         // A document. Everything it holds lives in blocks from its block source, which it hands back when it is
         // cleared, parsed again or destroyed. Values, strings and views taken from it are valid until then, except
         // that an edit moves the elements or members of the array or object it changes: pointers to them, and views
-        // and pointers into them, are not valid after it, while views of the edited value itself stay valid. A
-        // removal moves the later members down in place, so a pointer kept to one of them then points at another,
-        // and an edit through it changes that one; find a value again after an edit.
+        // and pointers into them, are not valid after it, while views of the edited value itself stay valid.
         class StructuredData
         {
+            friend class EditHandle;
             friend class DocumentParser;
             friend class PendingValues;
             friend class Builder;
@@ -706,33 +724,37 @@ namespace C4
             template <class T>
             Status SerializeFrom( const T& data ) noexcept;
 
-            // Edits of a value of this document, taken from its views. The new value is built before anything
-            // changes, so it may be built from the value it replaces or joins, and a failure leaves the document as
-            // it was. Memory a removal frees, or an array or object outgrows, comes back when the document is cleared.
+            // A handle to edit a value of this document. A value of another document gives a handle that every edit
+            // refuses.
+            TERATHON_API EditHandle Edit( const Value& value ) noexcept;
+
+            // Edits of a value of this document. The new value is built before anything changes, so it may be built
+            // from the value it replaces or joins, and a failure leaves the document as it was. Memory a removal
+            // frees, or an array or object outgrows, comes back when the document is cleared.
             template <class T>
-            Status SerializeAt( const Value& target, const T& data ) noexcept;
+            Status SerializeAt( EditHandle& target, const T& data ) noexcept;
 
             template <class T>
-            Status AppendElement( const Value& array, const T& data ) noexcept;
+            Status AppendElement( EditHandle& array, const T& data ) noexcept;
 
             template <class T>
-            Status AddMember( const Value& object, const char* name, uint32 length, const T& data ) noexcept;
+            Status AddMember( EditHandle& object, const char* name, uint32 length, const T& data ) noexcept;
 
             template <class T>
-            Status AddMember( const Value& object, const char* name, const T& data ) noexcept
+            Status AddMember( EditHandle& object, const char* name, const T& data ) noexcept
             {
                 return AddMember( object, name, Detail::GetTextLength( name ), data );
             }
 
-            TERATHON_API Status RemoveElement( const Value& array, uint32 index ) noexcept;
-            TERATHON_API Status RemoveMember( const Value& object, const char* name, uint32 length ) noexcept;
+            TERATHON_API Status RemoveElement( EditHandle& array, uint32 index ) noexcept;
+            TERATHON_API Status RemoveMember( EditHandle& object, const char* name, uint32 length ) noexcept;
 
-            Status RemoveMember( const Value& object, const char* name ) noexcept
+            Status RemoveMember( EditHandle& object, const char* name ) noexcept
             {
                 return RemoveMember( object, name, Detail::GetTextLength( name ) );
             }
 
-            TERATHON_API Status EmptyObject( const Value& object ) noexcept;
+            TERATHON_API Status EmptyObject( EditHandle& object ) noexcept;
 
             TERATHON_API void Clear() noexcept;
 
@@ -750,8 +772,9 @@ namespace C4
             uint64       nextBlockSize = 0;
             const Value* root          = nullptr;
             Builder*     builder       = nullptr;
+            uint64       editCount     = 0;
 
-            enum class EditKind : uint8
+            enum class ChangeKind : uint8
             {
                 kDocument,
                 kReplace,
@@ -759,12 +782,12 @@ namespace C4
                 kAddMember
             };
 
-            struct Edit
+            struct Change
             {
-                EditKind     kind;
-                const Value* target;
-                const char*  name;
-                uint32       length;
+                ChangeKind  kind;
+                EditHandle* handle;
+                const char* name;
+                uint32      length;
             };
 
             void* AllocateAligned( uint64 size ) noexcept;
@@ -772,15 +795,21 @@ namespace C4
             void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
 
             template <class T>
-            Status Build( const Edit& edit, const T& data ) noexcept;
+            Status Build( const Change& change, const T& data ) noexcept;
 
-            TERATHON_API Status BeginBuild( const Edit& edit, Node& rootNode ) noexcept;
-            TERATHON_API Status EndBuild( const Edit& edit, const Node& rootNode, Status status ) noexcept;
+            TERATHON_API Status BeginBuild( const Change& change, Node& rootNode ) noexcept;
+            TERATHON_API Status EndBuild( const Change& change, const Node& rootNode, Status status ) noexcept;
 
-            Status CheckEdit( const Value& target, Type type ) const noexcept;
-            Status Splice( const Edit& edit, const Value& built ) noexcept;
+            Status CheckEdit( const EditHandle& handle ) const noexcept;
+            Status CheckEdit( const EditHandle& handle, Type type ) const noexcept;
+            Status Splice( const Change& change, const Value& built ) noexcept;
             bool   MakeRoom( Value& container ) noexcept;
         };
+
+        inline const Value* EditHandle::Get() const noexcept
+        {
+            return ( document && ( document->editCount == edit ) ) ? value : nullptr;
+        }
 
         // The names and array indices from the root to the value at fault when a read fails, innermost first. The
         // traced functions add to it as they return a failure.
@@ -1766,38 +1795,38 @@ namespace C4
         }
 
         template <class T>
-        Status StructuredData::Build( const Edit& edit, const T& data ) noexcept
+        Status StructuredData::Build( const Change& change, const T& data ) noexcept
         {
             Node   rootNode;
-            Status status = BeginBuild( edit, rootNode );
+            Status status = BeginBuild( change, rootNode );
 
             status = ( status == Status::kOk ) ? SerializeValue( rootNode, data ) : status;
 
-            return EndBuild( edit, rootNode, status );
+            return EndBuild( change, rootNode, status );
         }
 
         template <class T>
         Status StructuredData::SerializeFrom( const T& data ) noexcept
         {
-            return Build( Edit { EditKind::kDocument, nullptr, nullptr, 0 }, data );
+            return Build( Change { ChangeKind::kDocument, nullptr, nullptr, 0 }, data );
         }
 
         template <class T>
-        Status StructuredData::SerializeAt( const Value& target, const T& data ) noexcept
+        Status StructuredData::SerializeAt( EditHandle& target, const T& data ) noexcept
         {
-            return Build( Edit { EditKind::kReplace, &target, nullptr, 0 }, data );
+            return Build( Change { ChangeKind::kReplace, &target, nullptr, 0 }, data );
         }
 
         template <class T>
-        Status StructuredData::AppendElement( const Value& array, const T& data ) noexcept
+        Status StructuredData::AppendElement( EditHandle& array, const T& data ) noexcept
         {
-            return Build( Edit { EditKind::kAppend, &array, nullptr, 0 }, data );
+            return Build( Change { ChangeKind::kAppend, &array, nullptr, 0 }, data );
         }
 
         template <class T>
-        Status StructuredData::AddMember( const Value& object, const char* name, uint32 length, const T& data ) noexcept
+        Status StructuredData::AddMember( EditHandle& object, const char* name, uint32 length, const T& data ) noexcept
         {
-            return Build( Edit { EditKind::kAddMember, &object, name, length }, data );
+            return Build( Change { ChangeKind::kAddMember, &object, name, length }, data );
         }
 
     } // namespace Json

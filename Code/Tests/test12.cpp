@@ -36,7 +36,8 @@ void TestNullRoot()
     double value = 0;
     CheckStatus( Json::Deserialize( nullValue, "x", value ), Json::Status::kInvalidValueType, "Deserialize from a null value" );
     CheckStatus( Json::Validate( nullValue, "x", value ), Json::Status::kInvalidValueType, "Validate a null value" );
-    CheckStatus( sd.AddMember( nullValue, "x", value ), Json::Status::kInvalidValueType, "add a member to a null value" );
+    Json::EditHandle outside = sd.Edit( nullValue );
+    CheckStatus( sd.AddMember( outside, "x", value ), Json::Status::kInvalidValueType, "add a member to a value outside the document" );
 
     Terathon::Array<double> array;
     CheckStatus( Json::Deserialize( nullValue, array ), Json::Status::kInvalidValueType, "Deserialize an array from a null value" );
@@ -85,7 +86,8 @@ void TestFailedSerialize()
     point.y = 4;
 
     CheckStatus( sd.SerializeFrom( point ), Json::Status::kOk, "serialize a point" );
-    CheckStatus( sd.SerializeAt( *sd.GetRoot(), Repeated() ), Json::Status::kDuplicateName, "a failing SerializeAt" );
+    Json::EditHandle root = sd.Edit( *sd.GetRoot() );
+    CheckStatus( sd.SerializeAt( root, Repeated() ), Json::Status::kDuplicateName, "a failing SerializeAt" );
 
     Point roundTrip;
     CheckStatus( sd.DeserializeTo( roundTrip ), Json::Status::kOk, "the old document survives a failed SerializeAt" );
@@ -112,7 +114,9 @@ void TestSerializeMapOntoObject()
         Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, "{\"q\":[1,2,3],\"r\":{\"s\":1}}" ).status, Json::Status::kOk, "parse an object" );
-        CheckStatus( sd.SerializeAt( *sd.GetRoot(), map ), Json::Status::kOk, "serialize a map onto an object with members" );
+
+        Json::EditHandle object = sd.Edit( *sd.GetRoot() );
+        CheckStatus( sd.SerializeAt( object, map ), Json::Status::kOk, "serialize a map onto an object with members" );
         CheckStatus( sd.Write( "Data/Test/out_test12_map.json" ), Json::Status::kOk, "write the replaced object" );
 
         Json::StructuredData reparsed;

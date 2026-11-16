@@ -99,10 +99,11 @@ void TestOrderSurvivesDirectChanges()
     Json::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":2,\"c\":3}" ).status, Json::Status::kOk, "parse three members" );
 
-    const Json::Value& root = *sd.GetRoot();
+    const Json::Value& root   = *sd.GetRoot();
+    Json::EditHandle   edited = sd.Edit( root );
 
-    CheckStatus( sd.RemoveMember( root, "a" ), Json::Status::kOk, "remove the first member" );
-    CheckStatus( sd.RemoveMember( root, "c" ), Json::Status::kOk, "remove the last member" );
+    CheckStatus( sd.RemoveMember( edited, "a" ), Json::Status::kOk, "remove the first member" );
+    CheckStatus( sd.RemoveMember( edited, "c" ), Json::Status::kOk, "remove the last member" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_direct.json" ), Json::Status::kOk, "write after removing members" );
 
@@ -112,8 +113,10 @@ void TestOrderSurvivesDirectChanges()
     Json::StructuredData other;
     CheckStatus( ParseText( other, "{\"x\":0}" ).status, Json::Status::kOk, "parse a second object" );
 
-    CheckStatus( other.AddMember( *other.GetRoot(), "b", *root.AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another object" );
-    CheckStatus( sd.RemoveMember( root, "b" ), Json::Status::kOk, "remove the copied member from its object" );
+    Json::EditHandle otherRoot = other.Edit( *other.GetRoot() );
+
+    CheckStatus( other.AddMember( otherRoot, "b", *root.AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another object" );
+    CheckStatus( sd.RemoveMember( edited, "b" ), Json::Status::kOk, "remove the copied member from its object" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_direct.json" ), Json::Status::kOk, "write the object a member moved out of" );
     Check( ReadTextFile( "Data/Test/out_test11_direct.json", text ) && text == "{\n}", "a moved member leaves its old object" );
@@ -146,10 +149,11 @@ void TestAccountedMap()
 
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":2,\"c\":3}" ).status, Json::Status::kOk, "parse three members" );
 
-    const Json::Value& root = *sd.GetRoot();
+    const Json::Value& root   = *sd.GetRoot();
+    Json::EditHandle   edited = sd.Edit( root );
 
-    CheckStatus( sd.RemoveMember( root, "b" ), Json::Status::kOk, "remove a member" );
-    CheckStatus( sd.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
+    CheckStatus( sd.RemoveMember( edited, "b" ), Json::Status::kOk, "remove a member" );
+    CheckStatus( sd.RemoveMember( edited, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_accounted.json" ), Json::Status::kOk, "write after removing a member" );
 
@@ -160,12 +164,12 @@ void TestAccountedMap()
     Check( reparsedRoot.GetMemberCount() == 2 && reparsedRoot.FindNumber( "a" ) && reparsedRoot.FindNumber( "c" ) && !reparsedRoot.FindNumber( "b" ),
            "the removed member is not written" );
 
-    CheckStatus( sd.AddMember( root, "z", 5.0 ), Json::Status::kOk, "insert a new member" );
-    CheckStatus( sd.AddMember( root, "z", 6.0 ), Json::Status::kDuplicateName, "a duplicate insert is refused" );
+    CheckStatus( sd.AddMember( edited, "z", 5.0 ), Json::Status::kOk, "insert a new member" );
+    CheckStatus( sd.AddMember( edited, "z", 6.0 ), Json::Status::kDuplicateName, "a duplicate insert is refused" );
 
     Check( root.AsObject().FindNumber( "z" ) && *root.AsObject().FindNumber( "z" ) == 5.0, "the first inserted member stays" );
 
-    CheckStatus( sd.SerializeAt( root, Json::ObjectMap<double>() ), Json::Status::kOk, "serialize an empty map onto the object" );
+    CheckStatus( sd.SerializeAt( edited, Json::ObjectMap<double>() ), Json::Status::kOk, "serialize an empty map onto the object" );
     Check( root.AsObject() && root.AsObject().GetMemberCount() == 0, "purge removes every member" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_accounted.json" ), Json::Status::kOk, "write after purging" );
@@ -231,8 +235,10 @@ void TestLargeObject()
     Check( ( root.GetMemberCount() == Terathon::uint32( count ) ) && ( *root.FindNumber( "k50" ) == -1 ) && ( root.begin()[ 50 ].GetName() == "k50" ),
            "the last value of a duplicate takes the first one's place" );
 
-    CheckStatus( sd.RemoveMember( *sd.GetRoot(), "k10" ), Json::Status::kOk, "remove a member of a large object" );
-    CheckStatus( sd.RemoveMember( *sd.GetRoot(), "k20" ), Json::Status::kOk, "remove another member of a large object" );
+    Json::EditHandle edited = sd.Edit( *sd.GetRoot() );
+
+    CheckStatus( sd.RemoveMember( edited, "k10" ), Json::Status::kOk, "remove a member of a large object" );
+    CheckStatus( sd.RemoveMember( edited, "k20" ), Json::Status::kOk, "remove another member of a large object" );
 
     found = ( root.GetMemberCount() == Terathon::uint32( count - 2 ) ) && !root.Find( "k10" ) && !root.Find( "k20" );
 
@@ -244,7 +250,7 @@ void TestLargeObject()
 
     Check( found, "members removed from a large object are gone and the others are still found" );
 
-    CheckStatus( sd.AddMember( *sd.GetRoot(), "k20", 20.0 ), Json::Status::kOk, "insert a removed member again" );
+    CheckStatus( sd.AddMember( edited, "k20", 20.0 ), Json::Status::kOk, "insert a removed member again" );
     Check( ( root.GetMemberCount() == Terathon::uint32( count - 1 ) ) && ( root.begin()[ count - 2 ].GetName() == "k20" ) &&
                ( root.Find( "k20" ) == &root.begin()[ count - 2 ].GetValue() ) && ( *root.FindNumber( "k20" ) == 20 ),
            "a member inserted again goes last and is found" );

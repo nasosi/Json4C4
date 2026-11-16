@@ -187,10 +187,10 @@ void TestAppendAfterFailure()
     Json::StructuredData sd( source );
     CheckStatus( ParseText( sd, "[1,2,3,4]" ).status, Json::Status::kOk, "parse an array" );
 
-    const Json::Value& root      = *sd.GetRoot();
-    long               failures  = 0;
-    long               successes = 0;
-    bool               unchanged = true;
+    Json::EditHandle root      = sd.Edit( *sd.GetRoot() );
+    long             failures  = 0;
+    long             successes = 0;
+    bool             unchanged = true;
 
     for ( int a = 0; a < 40; a++ )
     {
@@ -213,7 +213,7 @@ void TestAppendAfterFailure()
     }
 
     Check( failures > 0, "appending saw refused blocks" );
-    Check( unchanged && ( long( root.AsArray().GetElementCount() ) == 4 + successes ), "failed appends leave the array unchanged" );
+    Check( unchanged && ( long( root.Get()->AsArray().GetElementCount() ) == 4 + successes ), "failed appends leave the array unchanged" );
 
     CheckStatus( sd.Write( "Data/Test/out_test14_append.json" ), Json::Status::kOk, "an array that saw failed appends can be written" );
 

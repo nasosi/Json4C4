@@ -287,7 +287,7 @@ void TestInvalidStrings()
 
     Check( WriteTextFile( "Data/Test/out_test10_invalid.json", "[1]" ), "write the file to keep" );
 
-    const Json::Value& string = sd.GetRoot()->AsArray()[ 0 ];
+    Json::EditHandle string = sd.Edit( sd.GetRoot()->AsArray()[ 0 ] );
 
     const char* invalid[] = { "\xFF", "a\xC3", "\xED\xA0\x80", "\xC0\xAF", "\xF4\x90\x80\x80" };
 

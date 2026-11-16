@@ -1,5 +1,6 @@
-// Editing a 3.0 document: members and elements added and removed in place, values replaced, copies between documents,
-// objects that grow past 16 members and shrink back, and edits refused or failed leaving the document as it was.
+// Editing a document: members and elements added and removed in place, values replaced, copies between documents,
+// objects that grow past 16 members and shrink back, edits refused or failed leaving the document as it was, and handles
+// that fail closed once the document has changed.
 
 #include "TestCheck.h"
 
@@ -87,7 +88,7 @@ Json::Status Parse( Json::StructuredData& data, const char* text )
     return data.ParseText( text, strlen( text ) ).status;
 }
 
-Json::Status AddNumber( Json::StructuredData& data, const Json::Value& object, int number );
+Json::Status AddNumber( Json::StructuredData& data, Json::EditHandle& object, int number );
 
 void TestMembers()
 {
@@ -95,8 +96,8 @@ void TestMembers()
 
     CheckStatus( Parse( data, "{ \"a\": 1, \"b\": 2, \"c\": 3 }" ), Json::Status::kOk, "parse three members" );
 
-    const Json::Value& root   = *data.GetRoot();
-    Json::ObjectView   object = root.AsObject();
+    Json::EditHandle root   = data.Edit( *data.GetRoot() );
+    Json::ObjectView object = root.Get()->AsObject();
 
     CheckStatus( data.RemoveMember( root, "b" ), Json::Status::kOk, "remove a member" );
     CheckStatus( data.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
@@ -125,8 +126,11 @@ void TestMembers()
 
     CheckStatus( data.EmptyObject( root ), Json::Status::kOk, "empty a large object" );
     CheckStatus( AddNumber( data, root, 7 ), Json::Status::kOk, "add to the emptied object" );
-    Check( Holds( data, "{ \"k7\": 7 }" ) && FindsEveryMember( root ), "an emptied object takes new members" );
-    CheckStatus( data.EmptyObject( *root.AsObject().Find( "k7" ) ), Json::Status::kInvalidValueType, "empty a number" );
+    Check( Holds( data, "{ \"k7\": 7 }" ) && FindsEveryMember( *root.Get() ), "an emptied object takes new members" );
+
+    Json::EditHandle number = data.Edit( *object.Find( "k7" ) );
+
+    CheckStatus( data.EmptyObject( number ), Json::Status::kInvalidValueType, "empty a number" );
 
     CheckStatus( data.AppendElement( root, 1.0 ), Json::Status::kInvalidValueType, "append to an object" );
     CheckStatus( data.RemoveElement( root, 0 ), Json::Status::kInvalidValueType, "remove an element of an object" );
@@ -139,13 +143,20 @@ void TestEmptyContainers()
 
     CheckStatus( Parse( data, "{ \"a\": [], \"o\": {} }" ), Json::Status::kOk, "parse an empty array and object" );
 
-    const Json::Value& root = *data.GetRoot();
+    const Json::Value& root  = *data.GetRoot();
+    Json::EditHandle   array = data.Edit( *root.AsObject().Find( "a" ) );
 
-    CheckStatus( data.AppendElement( *root.AsObject().Find( "a" ), true ), Json::Status::kOk, "append to an empty array" );
-    CheckStatus( data.AddMember( *root.AsObject().Find( "o" ), "k", String<>( "v" ) ), Json::Status::kOk, "add to an empty object" );
+    CheckStatus( data.AppendElement( array, true ), Json::Status::kOk, "append to an empty array" );
+
+    Json::EditHandle object = data.Edit( *root.AsObject().Find( "o" ) );
+
+    CheckStatus( data.AddMember( object, "k", String<>( "v" ) ), Json::Status::kOk, "add to an empty object" );
     Check( Holds( data, "{ \"a\": [ true ], \"o\": { \"k\": \"v\" } }" ) && FindsEveryMember( root ), "the first element and member" );
-    CheckStatus( data.RemoveMember( *root.AsObject().Find( "o" ), "k" ), Json::Status::kOk, "remove the only member" );
-    CheckStatus( data.RemoveElement( *root.AsObject().Find( "a" ), 0 ), Json::Status::kOk, "remove the only element" );
+    CheckStatus( data.RemoveMember( object, "k" ), Json::Status::kOk, "remove the only member" );
+
+    array = data.Edit( *root.AsObject().Find( "a" ) );
+
+    CheckStatus( data.RemoveElement( array, 0 ), Json::Status::kOk, "remove the only element" );
     Check( Holds( data, "{ \"a\": [], \"o\": {} }" ), "empty again" );
 }
 
@@ -155,9 +166,9 @@ void TestElements()
 
     CheckStatus( Parse( data, "[ 1, 2, 3, 4 ]" ), Json::Status::kOk, "parse an array" );
 
-    const Json::Value& root  = *data.GetRoot();
-    Json::ArrayView    array = root.AsArray();
-    bool               same  = true;
+    Json::EditHandle root  = data.Edit( *data.GetRoot() );
+    Json::ArrayView  array = root.Get()->AsArray();
+    bool             same  = true;
 
     for ( int a = 0; a < 40; a++ )
     {
@@ -177,10 +188,12 @@ void TestElements()
     CheckStatus( data.RemoveElement( root, 43 ), Json::Status::kIndexOutOfRange, "remove past the end" );
     Check( ( array.GetElementCount() == 43 ) && ( *array[ 0 ].AsNumber() == 2 ) && ( *array[ 42 ].AsNumber() == 39 ), "the rest move down" );
 
-    CheckStatus( data.SerializeAt( array[ 1 ], String<>( "three" ) ), Json::Status::kOk, "replace an element" );
-    Check( array[ 1 ].AsString() == "three", "the replaced element" );
-
     CheckStatus( data.AddMember( root, "a", 1.0 ), Json::Status::kInvalidValueType, "add a member to an array" );
+
+    Json::EditHandle element = data.Edit( array[ 1 ] );
+
+    CheckStatus( data.SerializeAt( element, String<>( "three" ) ), Json::Status::kOk, "replace an element" );
+    Check( array[ 1 ].AsString() == "three", "the replaced element" );
 }
 
 // The members k<n> of an object for the numbers given, in order. Each is found by name and the order is kept.
@@ -200,7 +213,7 @@ bool HasMembers( const Json::Value& object, const int* numbers, int count )
     return same && !view.Find( "k-1" );
 }
 
-Json::Status AddNumber( Json::StructuredData& data, const Json::Value& object, int number )
+Json::Status AddNumber( Json::StructuredData& data, Json::EditHandle& object, int number )
 {
     char name[ 16 ];
     snprintf( name, sizeof( name ), "k%d", number );
@@ -208,7 +221,7 @@ Json::Status AddNumber( Json::StructuredData& data, const Json::Value& object, i
     return data.AddMember( object, name, double( number ) );
 }
 
-Json::Status RemoveNumber( Json::StructuredData& data, const Json::Value& object, int number )
+Json::Status RemoveNumber( Json::StructuredData& data, Json::EditHandle& object, int number )
 {
     char name[ 16 ];
     snprintf( name, sizeof( name ), "k%d", number );
@@ -238,12 +251,12 @@ bool EditAcrossSixteen( bool growFirst )
         return false;
     }
 
-    const Json::Value& object = *data.GetRoot();
-    int                numbers[ 64 ];
-    int                count    = 20;
-    int                next     = 100;
-    int                removals = 0;
-    bool               same     = true;
+    Json::EditHandle object = data.Edit( *data.GetRoot() );
+    int              numbers[ 64 ];
+    int              count    = 20;
+    int              next     = 100;
+    int              removals = 0;
+    bool             same     = true;
 
     for ( int a = 0; a < count; a++ )
     {
@@ -264,7 +277,7 @@ bool EditAcrossSixteen( bool growFirst )
             }
 
             count--;
-            same = same && HasMembers( object, numbers, count );
+            same = same && HasMembers( *object.Get(), numbers, count );
         }
     };
 
@@ -274,7 +287,7 @@ bool EditAcrossSixteen( bool growFirst )
         {
             same               = AddNumber( data, object, next ) == Json::Status::kOk;
             numbers[ count++ ] = next++;
-            same               = same && HasMembers( object, numbers, count );
+            same               = same && HasMembers( *object.Get(), numbers, count );
         }
     };
 
@@ -305,9 +318,13 @@ void TestSelfCopies()
     CheckStatus( Parse( data, "{ \"list\": [ 1, [ 2 ] ], \"x\": { \"y\": \"z\" } }" ), Json::Status::kOk, "parse a list and an object" );
 
     const Json::Value& root = *data.GetRoot();
+    Json::EditHandle   list = data.Edit( *root.AsObject().Find( "list" ) );
 
-    CheckStatus( data.AppendElement( *root.AsObject().Find( "list" ), *root.AsObject().Find( "list" ) ), Json::Status::kOk, "append an array to itself" );
-    CheckStatus( data.AddMember( root, "copy", *root.AsObject().Find( "x" ) ), Json::Status::kOk, "add a copy of a member to its object" );
+    CheckStatus( data.AppendElement( list, *root.AsObject().Find( "list" ) ), Json::Status::kOk, "append an array to itself" );
+
+    Json::EditHandle object = data.Edit( root );
+
+    CheckStatus( data.AddMember( object, "copy", *root.AsObject().Find( "x" ) ), Json::Status::kOk, "add a copy of a member to its object" );
     Check( Holds( data, "{ \"list\": [ 1, [ 2 ], [ 1, [ 2 ] ] ], \"x\": { \"y\": \"z\" }, \"copy\": { \"y\": \"z\" } }" ) && FindsEveryMember( root ),
            "the copies" );
 }
@@ -320,14 +337,21 @@ void TestOtherDocuments()
     CheckStatus( Parse( from, "{ \"a\": 1, \"b\": { \"c\": [ true, null, \"s\" ] } }" ), Json::Status::kOk, "parse the first document" );
     CheckStatus( Parse( to, "{ \"x\": 0 }" ), Json::Status::kOk, "parse the second document" );
 
-    CheckStatus( to.AddMember( *to.GetRoot(), "b", *from.GetRoot()->AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another document" );
-    CheckStatus( from.RemoveMember( *from.GetRoot(), "b" ), Json::Status::kOk, "remove it from the first" );
+    Json::EditHandle toRoot   = to.Edit( *to.GetRoot() );
+    Json::EditHandle fromRoot = from.Edit( *from.GetRoot() );
+
+    CheckStatus( to.AddMember( toRoot, "b", *from.GetRoot()->AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another document" );
+    CheckStatus( from.RemoveMember( fromRoot, "b" ), Json::Status::kOk, "remove it from the first" );
     Check( Holds( from, "{ \"a\": 1 }" ) && Holds( to, "{ \"x\": 0, \"b\": { \"c\": [ true, null, \"s\" ] } }" ) && FindsEveryMember( *from.GetRoot() ) &&
                FindsEveryMember( *to.GetRoot() ),
            "a member moved between documents" );
 
-    CheckStatus( to.RemoveMember( *from.GetRoot(), "a" ), Json::Status::kInvalidValueType, "a value of another document is refused" );
-    CheckStatus( to.SerializeAt( *from.GetRoot(), 1.0 ), Json::Status::kInvalidValueType, "replacing a value of another document is refused" );
+    Json::EditHandle foreign = to.Edit( *from.GetRoot() );
+
+    Check( !foreign.Get(), "a value of another document gives an empty handle" );
+    CheckStatus( to.RemoveMember( foreign, "a" ), Json::Status::kInvalidValueType, "an empty handle is refused" );
+    CheckStatus( to.RemoveMember( fromRoot, "a" ), Json::Status::kInvalidValueType, "a handle of another document is refused" );
+    CheckStatus( to.SerializeAt( fromRoot, 1.0 ), Json::Status::kInvalidValueType, "replacing through a handle of another document is refused" );
     Check( Holds( from, "{ \"a\": 1 }" ), "the other document is left alone" );
 }
 
@@ -335,7 +359,7 @@ void TestOtherDocuments()
 struct Meddler
 {
     Json::StructuredData* data   = nullptr;
-    const Json::Value*    target = nullptr;
+    Json::EditHandle*     target = nullptr;
     mutable Json::Status  edit   = Json::Status::kOk;
     mutable Json::Status  build  = Json::Status::kOk;
 };
@@ -355,10 +379,13 @@ void TestEditsDuringBuild()
 
     CheckStatus( Parse( data, "[ 1 ]" ), Json::Status::kOk, "parse an array" );
 
-    meddler.data   = &data;
-    meddler.target = data.GetRoot();
+    Json::EditHandle root    = data.Edit( *data.GetRoot() );
+    Json::EditHandle meddled = data.Edit( *data.GetRoot() );
 
-    CheckStatus( data.AppendElement( *data.GetRoot(), meddler ), Json::Status::kOk, "append through a Serialize that edits" );
+    meddler.data   = &data;
+    meddler.target = &meddled;
+
+    CheckStatus( data.AppendElement( root, meddler ), Json::Status::kOk, "append through a Serialize that edits" );
     CheckStatus( meddler.edit, Json::Status::kInvalidValueType, "an edit during a build is refused" );
     CheckStatus( meddler.build, Json::Status::kInvalidValueType, "a SerializeFrom during a build is refused" );
     Check( Holds( data, "[ 1, 3 ]" ), "the build goes on" );
@@ -379,12 +406,13 @@ bool RunEdits( CountingSource& source, int& refusedEdits )
         return status == Json::Status::kAllocationRefused;
     }
 
-    const Json::Value& root = *data.GetRoot();
-    bool               same = true;
+    bool same = true;
 
     for ( int step = 0; same && ( step < 68 ); step++ )
     {
-        String<> before = WriteNew( data );
+        String<>         before = WriteNew( data );
+        Json::EditHandle root   = data.Edit( *data.GetRoot() );
+        Json::EditHandle array  = data.Edit( *data.GetRoot()->AsObject().Find( "array" ) );
 
         if ( step < 20 )
         {
@@ -392,7 +420,7 @@ bool RunEdits( CountingSource& source, int& refusedEdits )
         }
         else if ( step < 60 )
         {
-            status = data.AppendElement( *root.AsObject().Find( "array" ), double( step ) );
+            status = data.AppendElement( array, double( step ) );
         }
         else
         {
@@ -409,10 +437,65 @@ bool RunEdits( CountingSource& source, int& refusedEdits )
             same = status == Json::Status::kOk;
         }
 
-        same = same && FindsEveryMember( root );
+        same = same && FindsEveryMember( *data.GetRoot() );
     }
 
     return same;
+}
+
+// A handle fails closed once something else has changed the document, where a pointer kept across the change would edit
+// another value.
+void TestHandles()
+{
+    Json::StructuredData data;
+
+    CheckStatus( Parse( data, "{ \"a\": 1, \"b\": [ 2 ], \"c\": [ 3 ] }" ), Json::Status::kOk, "parse three members" );
+
+    const Json::Value& value = *data.GetRoot();
+    Json::EditHandle   root  = data.Edit( value );
+    Json::EditHandle   b     = data.Edit( *value.AsObject().Find( "b" ) );
+
+    CheckStatus( data.RemoveMember( root, "a" ), Json::Status::kOk, "remove the member before another" );
+    Check( root.Get() == &value, "the handle an edit is given stays up to date" );
+    Check( !b.Get(), "a handle taken before another edit is stale" );
+    CheckStatus( data.AppendElement( b, 5.0 ), Json::Status::kStaleEditHandle, "an edit through a stale handle" );
+    Check( Holds( data, "{ \"b\": [ 2 ], \"c\": [ 3 ] }" ), "a stale handle edits neither its value nor the one now in its place" );
+
+    b = data.Edit( *value.AsObject().Find( "b" ) );
+
+    CheckStatus( data.AppendElement( b, 5.0 ), Json::Status::kOk, "an edit through a handle taken again" );
+    CheckStatus( data.AppendElement( b, 6.0 ), Json::Status::kOk, "a handle stays up to date through its own edits" );
+    CheckStatus( data.RemoveMember( root, "c" ), Json::Status::kStaleEditHandle, "a removal through a stale handle" );
+    CheckStatus( data.EmptyObject( root ), Json::Status::kStaleEditHandle, "emptying through a stale handle" );
+    CheckStatus( data.SerializeAt( root, 1.0 ), Json::Status::kStaleEditHandle, "a replacement through a stale handle" );
+    Check( Holds( data, "{ \"b\": [ 2, 5, 6 ], \"c\": [ 3 ] }" ), "only the handle up to date edits" );
+
+    root = data.Edit( value );
+
+    CheckStatus( data.AddMember( b, "x", 1.0 ), Json::Status::kInvalidValueType, "a member added to an array" );
+    CheckStatus( data.AddMember( root, "b", 1.0 ), Json::Status::kDuplicateName, "a repeated name" );
+    CheckStatus( data.RemoveElement( b, 9 ), Json::Status::kIndexOutOfRange, "an index out of range" );
+    Check( root.Get() && b.Get(), "failed edits leave handles up to date" );
+
+    CheckStatus( Parse( data, "[ 1 ]" ), Json::Status::kOk, "parse again" );
+    Check( !root.Get() && !b.Get(), "a parse makes handles stale" );
+    CheckStatus( data.RemoveElement( b, 0 ), Json::Status::kStaleEditHandle, "an edit after a parse" );
+
+    root = data.Edit( *data.GetRoot() );
+
+    CheckStatus( data.SerializeFrom( 2.0 ), Json::Status::kOk, "serialize a number" );
+    Check( !root.Get(), "a SerializeFrom makes handles stale" );
+
+    root = data.Edit( *data.GetRoot() );
+    data.Clear();
+
+    Check( !root.Get(), "a Clear makes handles stale" );
+    CheckStatus( data.SerializeAt( root, 1.0 ), Json::Status::kStaleEditHandle, "an edit after a Clear" );
+
+    Json::EditHandle empty;
+
+    Check( !empty.Get(), "an empty handle has no value" );
+    CheckStatus( data.SerializeAt( empty, 1.0 ), Json::Status::kInvalidValueType, "an edit through an empty handle" );
 }
 
 // Refuses each block request of the edits in turn, and then every request from it on.
@@ -452,6 +535,7 @@ int main()
     TestSelfCopies();
     TestOtherDocuments();
     TestEditsDuringBuild();
+    TestHandles();
     TestRefusedEdits();
 
     return TestResult();

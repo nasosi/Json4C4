@@ -156,13 +156,22 @@ void TestEdits()
 
     CheckStatus( ParseText( data, "{ \"a\": 1 }" ).status, Json::Status::kOk, "parse an object" );
 
-    const Json::Value& root = *data.GetRoot();
+    const Json::Value& root   = *data.GetRoot();
+    Json::EditHandle   number = data.Edit( *root.AsObject().Find( "a" ) );
 
-    CheckStatus( data.SerializeAt( *root.AsObject().Find( "a" ), 2.5f ), Json::Status::kOk, "replace a number with a float" );
+    CheckStatus( data.SerializeAt( number, 2.5f ), Json::Status::kOk, "replace a number with a float" );
     Check( root.AsObject().Find( "a" )->IsFloat(), "a replaced number is marked" );
-    CheckStatus( data.AddMember( root, "f", 0.1f ), Json::Status::kOk, "add a float" );
-    CheckStatus( data.AddMember( root, "list", list ), Json::Status::kOk, "add an array of floats" );
-    CheckStatus( data.AppendElement( *root.AsObject().Find( "list" ), 0.9f ), Json::Status::kOk, "append a float" );
+
+    Json::EditHandle edited = data.Edit( root );
+
+    CheckStatus( data.AddMember( edited, "f", 0.1f ), Json::Status::kOk, "add a float" );
+    CheckStatus( data.AddMember( edited, "list", list ), Json::Status::kOk, "add an array of floats" );
+
+    Json::EditHandle array = data.Edit( *root.AsObject().Find( "list" ) );
+
+    CheckStatus( data.AppendElement( array, 0.9f ), Json::Status::kOk, "append a float" );
+
+    edited = data.Edit( root );
 
     String<> expected = "{ \"f\": 0.1, \"list\": [ 0.7, 0.9 ]";
 
@@ -175,11 +184,11 @@ void TestEdits()
         snprintf( member, sizeof( member ), ", \"%s\": %g", name, a / 4.0 );
         expected += member;
 
-        CheckStatus( data.AddMember( root, name, a / 4.0f ), Json::Status::kOk, "add a member" );
+        CheckStatus( data.AddMember( edited, name, a / 4.0f ), Json::Status::kOk, "add a member" );
     }
 
-    CheckStatus( data.AddMember( root, "copy", *root.AsObject().Find( "f" ) ), Json::Status::kOk, "copy a float" );
-    CheckStatus( data.RemoveMember( root, "a" ), Json::Status::kOk, "remove the first member" );
+    CheckStatus( data.AddMember( edited, "copy", *root.AsObject().Find( "f" ) ), Json::Status::kOk, "copy a float" );
+    CheckStatus( data.RemoveMember( edited, "a" ), Json::Status::kOk, "remove the first member" );
     expected += ", \"copy\": 0.1 }";
 
     Check( Holds( data, expected ), "floats keep their form when they move" );
