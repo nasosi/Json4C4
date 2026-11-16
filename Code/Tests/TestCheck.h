@@ -47,7 +47,7 @@ inline int TestResult()
     return 0;
 }
 
-// A hash of results, to compare them with what 2.3.0 gave once 2.x is gone. A status is hashed by its place in a list of
+// A hash of results, to compare them with what 2.3.0 gave. A status is hashed by its place in a list of
 // the tests' own, so that numbering Status differently does not change the hash.
 class ResultHash
 {
@@ -82,7 +82,7 @@ public:
                                                  Json::Status::kStringIllegalChar,
                                                  Json::Status::kStringIllegalEscape,
                                                  Json::Status::kExpectedColon,
-                                                 Json::Status::kExpectedBeginingDoubleQuotes,
+                                                 Json::Status::kExpectedBeginningDoubleQuotes,
                                                  Json::Status::kExpectedEndingDoubleQuotes,
                                                  Json::Status::kFloatInvalid,
                                                  Json::Status::kExpectedTrueOrFalse,
@@ -160,28 +160,18 @@ inline Terathon::Array<char> MakeTextBuffer( const char* text, size_t length )
     return buffer;
 }
 
-inline Json::ParseResult ParseText( Json::StructuredData& sd, const char* text, size_t length, const Json::ParseOptions& options = Json::ParseOptions() )
-{
-    return sd.Parse( MakeTextBuffer( text, length ), options );
-}
-
-inline Json::ParseResult ParseText( Json::StructuredData& sd, const char* text, const Json::ParseOptions& options = Json::ParseOptions() )
-{
-    return ParseText( sd, text, strlen( text ), options );
-}
-
-inline Json::ParseResult ParseText( Json::V3::StructuredData& data, const char* text, size_t length, const Json::ParseOptions& options = Json::ParseOptions() )
+inline Json::ParseResult ParseText( Json::StructuredData& data, const char* text, size_t length, const Json::ParseOptions& options = Json::ParseOptions() )
 {
     return data.ParseText( text, Terathon::uint64( length ), options );
 }
 
-inline Json::ParseResult ParseText( Json::V3::StructuredData& data, const char* text, const Json::ParseOptions& options = Json::ParseOptions() )
+inline Json::ParseResult ParseText( Json::StructuredData& data, const char* text, const Json::ParseOptions& options = Json::ParseOptions() )
 {
     return ParseText( data, text, strlen( text ), options );
 }
 
 // The text a document writes, with a terminating zero.
-inline Terathon::String<> WriteText( const Json::V3::StructuredData& data, unsigned int indentationLength = 2 )
+inline Terathon::String<> WriteText( const Json::StructuredData& data, unsigned int indentationLength = 2 )
 {
     Terathon::Array<char> text;
 

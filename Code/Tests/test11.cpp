@@ -2,10 +2,8 @@
 
 #include <cstdlib>
 
-namespace V3 = Json::V3;
-
 // Hands out blocks with malloc and counts the blocks not handed back.
-class CountingSource final : public V3::BlockSource
+class CountingSource final : public Json::BlockSource
 {
 public:
     int outstandingCount = 0;
@@ -49,7 +47,7 @@ const char* const duplicateDocument = "{\"a\":1,\"a\":[2,3,4],\"b\":2,\"a\":{\"c
 
 void TestDuplicateKeysRejected()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     Json::ParseResult parseResult = ParseText( sd, duplicateDocument );
     CheckStatus( parseResult.status, Json::Status::kDuplicateName, "duplicate keys are rejected by default" );
@@ -64,10 +62,10 @@ void TestDuplicateKeysKept( Json::DuplicateNames policy, double expected, const 
     Json::ParseOptions options;
     options.duplicateNames = policy;
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, duplicateDocument, options ).status, Json::Status::kOk, description );
 
-    V3::ObjectView root = sd.GetRoot() ? sd.GetRoot()->AsObject() : V3::ObjectView();
+    Json::ObjectView root = sd.GetRoot() ? sd.GetRoot()->AsObject() : Json::ObjectView();
     Check( root.GetMemberCount() == 2, "duplicate keys are stored once" );
 
     if ( expected != 0 )
@@ -89,7 +87,7 @@ void TestDuplicateKeysKept( Json::DuplicateNames policy, double expected, const 
 
     for ( int a = 0; a < 100; a++ )
     {
-        V3::StructuredData repeated( source );
+        Json::StructuredData repeated( source );
         ParseText( repeated, "{\"a\":1,\"a\":[2,3,4],\"a\":{\"b\":[5]}}", options );
     }
 
@@ -98,10 +96,10 @@ void TestDuplicateKeysKept( Json::DuplicateNames policy, double expected, const 
 
 void TestOrderSurvivesDirectChanges()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":2,\"c\":3}" ).status, Json::Status::kOk, "parse three members" );
 
-    const V3::Value& root = *sd.GetRoot();
+    const Json::Value& root = *sd.GetRoot();
 
     CheckStatus( sd.RemoveMember( root, "a" ), Json::Status::kOk, "remove the first member" );
     CheckStatus( sd.RemoveMember( root, "c" ), Json::Status::kOk, "remove the last member" );
@@ -111,7 +109,7 @@ void TestOrderSurvivesDirectChanges()
     Terathon::String<> text;
     Check( ReadTextFile( "Data/Test/out_test11_direct.json", text ) && text == "{\n  \"b\" : 2\n}", "removed members are not written" );
 
-    V3::StructuredData other;
+    Json::StructuredData other;
     CheckStatus( ParseText( other, "{\"x\":0}" ).status, Json::Status::kOk, "parse a second object" );
 
     CheckStatus( other.AddMember( *other.GetRoot(), "b", *root.AsObject().Find( "b" ) ), Json::Status::kOk, "copy a member to another object" );
@@ -126,7 +124,7 @@ void TestOrderSurvivesDirectChanges()
 
 void TestDuplicateNames()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     CheckStatus( sd.SerializeFrom( Repeated() ), Json::Status::kDuplicateName, "a proto that repeats a name" );
     Check( sd.GetRoot() == nullptr, "a failed SerializeFrom does not set a root" );
@@ -134,7 +132,7 @@ void TestDuplicateNames()
     CountingSource source;
 
     {
-        V3::StructuredData repeated( source );
+        Json::StructuredData repeated( source );
         repeated.SerializeFrom( Repeated() );
         Check( source.outstandingCount == 0, "a failed SerializeFrom hands every block back" );
     }
@@ -144,21 +142,21 @@ void TestDuplicateNames()
 
 void TestAccountedMap()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":2,\"c\":3}" ).status, Json::Status::kOk, "parse three members" );
 
-    const V3::Value& root = *sd.GetRoot();
+    const Json::Value& root = *sd.GetRoot();
 
     CheckStatus( sd.RemoveMember( root, "b" ), Json::Status::kOk, "remove a member" );
     CheckStatus( sd.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
 
     CheckStatus( sd.Write( "Data/Test/out_test11_accounted.json" ), Json::Status::kOk, "write after removing a member" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test11_accounted.json" ).status, Json::Status::kOk, "reparse after removing a member" );
 
-    V3::ObjectView reparsedRoot = reparsed.GetRoot()->AsObject();
+    Json::ObjectView reparsedRoot = reparsed.GetRoot()->AsObject();
     Check( reparsedRoot.GetMemberCount() == 2 && reparsedRoot.FindNumber( "a" ) && reparsedRoot.FindNumber( "c" ) && !reparsedRoot.FindNumber( "b" ),
            "the removed member is not written" );
 
@@ -197,11 +195,11 @@ void TestLargeObject()
     const int count = 100;
     char      name[ 16 ];
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, LargeObjectText( count, "" ) ).status, Json::Status::kOk, "parse an object with many members" );
 
-    V3::ObjectView root  = sd.GetRoot()->AsObject();
-    bool           found = ( root.GetMemberCount() == Terathon::uint32( count ) ) && !root.Find( "k100" );
+    Json::ObjectView root  = sd.GetRoot()->AsObject();
+    bool             found = ( root.GetMemberCount() == Terathon::uint32( count ) ) && !root.Find( "k100" );
 
     for ( int a = 0; a < count; a++ )
     {
@@ -214,7 +212,7 @@ void TestLargeObject()
     int  position = 0;
     bool ordered  = true;
 
-    for ( const V3::Member& member : root )
+    for ( const Json::Member& member : root )
     {
         snprintf( name, sizeof( name ), "k%d", position++ );
         ordered = ordered && ( member.GetName() == name );

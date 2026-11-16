@@ -1,7 +1,5 @@
 #include "TestCheck.h"
 
-namespace V3 = Json::V3;
-
 struct PositionCase
 {
     const char*  text;
@@ -31,7 +29,7 @@ int main()
 {
     for ( const PositionCase& positionCase : positionCases )
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         Json::ParseResult parseResult = ParseText( sd, positionCase.text );
 
@@ -51,7 +49,7 @@ int main()
     }
 
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         Json::ParseResult parseResult = ParseText( sd, "[1]" );
         Check( parseResult.errorLine == 0 && parseResult.errorColumn == 0, "no position after a successful parse" );

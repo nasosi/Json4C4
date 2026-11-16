@@ -2,8 +2,6 @@
 
 #include <string>
 
-namespace V3 = Json::V3;
-
 std::string NestedArrays( int depth, bool closed )
 {
     return std::string( size_t( depth ), '[' ) + ( closed ? std::string( size_t( depth ), ']' ) : std::string() );
@@ -31,18 +29,18 @@ std::string NestedObjects( int depth, bool closed )
 int main()
 {
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, NestedArrays( 256, true ).c_str() ).status, Json::Status::kOk, "256 nested arrays" );
         Check( sd.GetRoot() != nullptr, "256 nested arrays have a root" );
         CheckStatus( sd.Write( "Data/Test/out_test07.json" ), Json::Status::kOk, "write 256 nested arrays" );
 
-        V3::StructuredData reparsed;
+        Json::StructuredData reparsed;
         CheckStatus( reparsed.Parse( "Data/Test/out_test07.json" ).status, Json::Status::kOk, "reparse 256 nested arrays" );
     }
 
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         Json::ParseResult parseResult = ParseText( sd, NestedArrays( 257, true ).c_str() );
         CheckStatus( parseResult.status, Json::Status::kMaximumNestingDepthExceeded, "257 nested arrays" );
@@ -51,14 +49,14 @@ int main()
     }
 
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, NestedArrays( 100000, false ).c_str() ).status, Json::Status::kMaximumNestingDepthExceeded, "100000 open arrays" );
     }
 
     {
-        Json::ParseOptions options;
-        V3::StructuredData sd;
+        Json::ParseOptions   options;
+        Json::StructuredData sd;
 
         options.maxNestingDepth = 10;
         CheckStatus( ParseText( sd, NestedArrays( 10, true ).c_str(), options ).status, Json::Status::kOk, "10 nested arrays with a limit of 10" );
@@ -75,7 +73,7 @@ int main()
     }
 
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, NestedObjects( 256, true ).c_str() ).status, Json::Status::kOk, "256 nested objects" );
         CheckStatus( ParseText( sd, NestedObjects( 257, true ).c_str() ).status, Json::Status::kMaximumNestingDepthExceeded, "257 nested objects" );
@@ -97,7 +95,7 @@ int main()
             text += "}]";
         }
 
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, text.c_str() ).status, Json::Status::kOk, "256 levels of mixed arrays and objects" );
         CheckStatus(
@@ -114,7 +112,7 @@ int main()
 
         text += "[]]";
 
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, text.c_str() ).status, Json::Status::kOk, "wide shallow array" );
     }

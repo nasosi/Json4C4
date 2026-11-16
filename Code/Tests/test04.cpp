@@ -3,7 +3,6 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
-namespace V3   = Json::V3;
 using String   = Terathon::String<>;
 
 struct MapExample
@@ -17,7 +16,7 @@ DEFINE_JSON4C4_FUNCTIONS( MapExample, PROTO )
 
 int main()
 {
-    V3::StructuredData jSd;
+    Json::StructuredData jSd;
 
     auto parseResult = jSd.Parse( "Data/Test/test_file04.json" );
 

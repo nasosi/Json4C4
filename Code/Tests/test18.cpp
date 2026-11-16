@@ -2,12 +2,10 @@
 
 #include <cstdlib>
 
-namespace V3 = Json::V3;
-
-bool SameResult( const V3::StructuredData& first,
-                 const Json::ParseResult&  firstResult,
-                 const V3::StructuredData& second,
-                 const Json::ParseResult&  secondResult )
+bool SameResult( const Json::StructuredData& first,
+                 const Json::ParseResult&    firstResult,
+                 const Json::StructuredData& second,
+                 const Json::ParseResult&    secondResult )
 {
     if ( ( firstResult.status != secondResult.status ) || ( firstResult.errorLine != secondResult.errorLine ) ||
          ( firstResult.errorColumn != secondResult.errorColumn ) )
@@ -40,12 +38,12 @@ void CheckBounded( const char* text, size_t length, const char* description )
     char* exact = static_cast<char*>( malloc( ( length != 0 ) ? length : 1 ) );
     memcpy( exact, text, length );
 
-    V3::StructuredData bounded;
-    V3::StructuredData followed;
-    V3::StructuredData terminated;
-    Json::ParseResult  boundedResult    = bounded.ParseText( exact, length );
-    Json::ParseResult  followedResult   = followed.ParseText( text, length );
-    Json::ParseResult  terminatedResult = terminated.Parse( MakeTextBuffer( text, length ) );
+    Json::StructuredData bounded;
+    Json::StructuredData followed;
+    Json::StructuredData terminated;
+    Json::ParseResult    boundedResult    = bounded.ParseText( exact, length );
+    Json::ParseResult    followedResult   = followed.ParseText( text, length );
+    Json::ParseResult    terminatedResult = terminated.Parse( MakeTextBuffer( text, length ) );
 
     bool same = SameResult( bounded, boundedResult, followed, followedResult ) && SameResult( bounded, boundedResult, terminated, terminatedResult );
 
@@ -186,7 +184,7 @@ void TestLongTails()
         char*  exact  = static_cast<char*>( malloc( length ) );
         memcpy( exact, c.text, length );
 
-        V3::StructuredData sd;
+        Json::StructuredData sd;
         CheckStatus( sd.ParseText( exact, length ).status, c.status, "a text with a long tail" );
         CheckBounded( c.text, length, "a text with a long tail" );
 
@@ -196,7 +194,7 @@ void TestLongTails()
 
 void TestEdges()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     CheckStatus( sd.ParseText( "[1]", 3 ).status, Json::Status::kOk, "a text without a terminating zero" );
     CheckStatus( sd.ParseText( nullptr, 5 ).status, Json::Status::kTextBufferContentsInvalid, "no text" );
@@ -217,7 +215,7 @@ void TestEdges()
 // Calls written for 2.2 keep their meaning next to ParseText.
 void TestParseOverloads()
 {
-    V3::StructuredData    sd;
+    Json::StructuredData  sd;
     Terathon::Array<char> buffer = MakeTextBuffer( "[1]", 3 );
 
     CheckStatus( sd.Parse( "Data/Examples/simple.json", {} ).status, Json::Status::kOk, "a file with braced options" );
@@ -229,8 +227,8 @@ void TestParseOverloads()
 
 void TestLimits()
 {
-    V3::StructuredData sd;
-    Json::ParseOptions options;
+    Json::StructuredData sd;
+    Json::ParseOptions   options;
 
     options.maxValueCount = 4;
     CheckStatus( ParseText( sd, "[1,2,3]", options ).status, Json::Status::kOk, "as many values as the limit" );

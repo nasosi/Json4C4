@@ -31,7 +31,6 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
-namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 01: Parsing, and deserializing data to an object.
@@ -55,8 +54,8 @@ int main()
     printf( "Example01: Simple parsing and deserialization.\n" );
 
     // 2. Parse the file and check parsing status
-    V3::StructuredData jsonStructuredData;
-    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
+    Json::StructuredData jsonStructuredData;
+    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {

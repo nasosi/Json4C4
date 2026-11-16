@@ -6,13 +6,11 @@
 #include <cstdint>
 #include <cstdlib>
 
-namespace V3 = Json::V3;
-
 using Terathon::String;
 
 // Hands out blocks with malloc, refuses the requests from refusedFirst to refusedLast, and checks that every block comes
 // back once with its size.
-class CountingSource final : public V3::BlockSource
+class CountingSource final : public Json::BlockSource
 {
 public:
     int64_t requestCount     = 0;
@@ -44,7 +42,7 @@ public:
     }
 };
 
-String<> WriteNew( const V3::StructuredData& data )
+String<> WriteNew( const Json::StructuredData& data )
 {
     Terathon::Array<char> text;
 
@@ -59,24 +57,24 @@ String<> WriteNew( const V3::StructuredData& data )
 }
 
 // Whether a document writes the same text as the one parsed from expected.
-bool Holds( const V3::StructuredData& data, const char* expected )
+bool Holds( const Json::StructuredData& data, const char* expected )
 {
-    V3::StructuredData other;
+    Json::StructuredData other;
 
     return ( other.ParseText( expected, strlen( expected ) ).status == Json::Status::kOk ) && ( strcmp( WriteNew( data ), WriteNew( other ) ) == 0 );
 }
 
 // Whether every member of every object in a value is found by its name, which reads the name index of a large object.
-bool FindsEveryMember( const V3::Value& value )
+bool FindsEveryMember( const Json::Value& value )
 {
     bool found = true;
 
-    for ( const V3::Value& element : value.AsArray() )
+    for ( const Json::Value& element : value.AsArray() )
     {
         found = found && FindsEveryMember( element );
     }
 
-    for ( const V3::Member& member : value.AsObject() )
+    for ( const Json::Member& member : value.AsObject() )
     {
         found = found && ( value.AsObject().Find( member.GetName() ) == &member.GetValue() ) && FindsEveryMember( member.GetValue() );
     }
@@ -84,19 +82,21 @@ bool FindsEveryMember( const V3::Value& value )
     return found;
 }
 
-Json::Status Parse( V3::StructuredData& data, const char* text )
+Json::Status Parse( Json::StructuredData& data, const char* text )
 {
     return data.ParseText( text, strlen( text ) ).status;
 }
 
+Json::Status AddNumber( Json::StructuredData& data, const Json::Value& object, int number );
+
 void TestMembers()
 {
-    V3::StructuredData data;
+    Json::StructuredData data;
 
     CheckStatus( Parse( data, "{ \"a\": 1, \"b\": 2, \"c\": 3 }" ), Json::Status::kOk, "parse three members" );
 
-    const V3::Value& root   = *data.GetRoot();
-    V3::ObjectView   object = root.AsObject();
+    const Json::Value& root   = *data.GetRoot();
+    Json::ObjectView   object = root.AsObject();
 
     CheckStatus( data.RemoveMember( root, "b" ), Json::Status::kOk, "remove a member" );
     CheckStatus( data.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
@@ -118,6 +118,16 @@ void TestMembers()
     CheckStatus( data.SerializeAt( root, Json::ObjectMap<double>() ), Json::Status::kOk, "serialize an empty map onto an object" );
     Check( Holds( data, "{}" ), "an empty map empties the object" );
 
+    for ( int a = 0; a < 20; a++ )
+    {
+        AddNumber( data, root, a );
+    }
+
+    CheckStatus( data.EmptyObject( root ), Json::Status::kOk, "empty a large object" );
+    CheckStatus( AddNumber( data, root, 7 ), Json::Status::kOk, "add to the emptied object" );
+    Check( Holds( data, "{ \"k7\": 7 }" ) && FindsEveryMember( root ), "an emptied object takes new members" );
+    CheckStatus( data.EmptyObject( *root.AsObject().Find( "k7" ) ), Json::Status::kInvalidValueType, "empty a number" );
+
     CheckStatus( data.AppendElement( root, 1.0 ), Json::Status::kInvalidValueType, "append to an object" );
     CheckStatus( data.RemoveElement( root, 0 ), Json::Status::kInvalidValueType, "remove an element of an object" );
 }
@@ -125,11 +135,11 @@ void TestMembers()
 // Empty arrays and objects hold no room until the first addition.
 void TestEmptyContainers()
 {
-    V3::StructuredData data;
+    Json::StructuredData data;
 
     CheckStatus( Parse( data, "{ \"a\": [], \"o\": {} }" ), Json::Status::kOk, "parse an empty array and object" );
 
-    const V3::Value& root = *data.GetRoot();
+    const Json::Value& root = *data.GetRoot();
 
     CheckStatus( data.AppendElement( *root.AsObject().Find( "a" ), true ), Json::Status::kOk, "append to an empty array" );
     CheckStatus( data.AddMember( *root.AsObject().Find( "o" ), "k", String<>( "v" ) ), Json::Status::kOk, "add to an empty object" );
@@ -141,13 +151,13 @@ void TestEmptyContainers()
 
 void TestElements()
 {
-    V3::StructuredData data;
+    Json::StructuredData data;
 
     CheckStatus( Parse( data, "[ 1, 2, 3, 4 ]" ), Json::Status::kOk, "parse an array" );
 
-    const V3::Value& root  = *data.GetRoot();
-    V3::ArrayView    array = root.AsArray();
-    bool             same  = true;
+    const Json::Value& root  = *data.GetRoot();
+    Json::ArrayView    array = root.AsArray();
+    bool               same  = true;
 
     for ( int a = 0; a < 40; a++ )
     {
@@ -174,10 +184,10 @@ void TestElements()
 }
 
 // The members k<n> of an object for the numbers given, in order. Each is found by name and the order is kept.
-bool HasMembers( const V3::Value& object, const int* numbers, int count )
+bool HasMembers( const Json::Value& object, const int* numbers, int count )
 {
-    V3::ObjectView view = object.AsObject();
-    bool           same = view.GetMemberCount() == uint32_t( count );
+    Json::ObjectView view = object.AsObject();
+    bool             same = view.GetMemberCount() == uint32_t( count );
 
     for ( int a = 0; same && ( a < count ); a++ )
     {
@@ -190,7 +200,7 @@ bool HasMembers( const V3::Value& object, const int* numbers, int count )
     return same && !view.Find( "k-1" );
 }
 
-Json::Status AddNumber( V3::StructuredData& data, const V3::Value& object, int number )
+Json::Status AddNumber( Json::StructuredData& data, const Json::Value& object, int number )
 {
     char name[ 16 ];
     snprintf( name, sizeof( name ), "k%d", number );
@@ -198,7 +208,7 @@ Json::Status AddNumber( V3::StructuredData& data, const V3::Value& object, int n
     return data.AddMember( object, name, double( number ) );
 }
 
-Json::Status RemoveNumber( V3::StructuredData& data, const V3::Value& object, int number )
+Json::Status RemoveNumber( Json::StructuredData& data, const Json::Value& object, int number )
 {
     char name[ 16 ];
     snprintf( name, sizeof( name ), "k%d", number );
@@ -221,19 +231,19 @@ bool EditAcrossSixteen( bool growFirst )
 
     text += "}";
 
-    V3::StructuredData data;
+    Json::StructuredData data;
 
     if ( Parse( data, text ) != Json::Status::kOk )
     {
         return false;
     }
 
-    const V3::Value& object = *data.GetRoot();
-    int              numbers[ 64 ];
-    int              count    = 20;
-    int              next     = 100;
-    int              removals = 0;
-    bool             same     = true;
+    const Json::Value& object = *data.GetRoot();
+    int                numbers[ 64 ];
+    int                count    = 20;
+    int                next     = 100;
+    int                removals = 0;
+    bool               same     = true;
 
     for ( int a = 0; a < count; a++ )
     {
@@ -290,11 +300,11 @@ void TestCrossingSixteen()
 // A value copied into the array or object it comes from is built before the array or object changes.
 void TestSelfCopies()
 {
-    V3::StructuredData data;
+    Json::StructuredData data;
 
     CheckStatus( Parse( data, "{ \"list\": [ 1, [ 2 ] ], \"x\": { \"y\": \"z\" } }" ), Json::Status::kOk, "parse a list and an object" );
 
-    const V3::Value& root = *data.GetRoot();
+    const Json::Value& root = *data.GetRoot();
 
     CheckStatus( data.AppendElement( *root.AsObject().Find( "list" ), *root.AsObject().Find( "list" ) ), Json::Status::kOk, "append an array to itself" );
     CheckStatus( data.AddMember( root, "copy", *root.AsObject().Find( "x" ) ), Json::Status::kOk, "add a copy of a member to its object" );
@@ -304,8 +314,8 @@ void TestSelfCopies()
 
 void TestOtherDocuments()
 {
-    V3::StructuredData from;
-    V3::StructuredData to;
+    Json::StructuredData from;
+    Json::StructuredData to;
 
     CheckStatus( Parse( from, "{ \"a\": 1, \"b\": { \"c\": [ true, null, \"s\" ] } }" ), Json::Status::kOk, "parse the first document" );
     CheckStatus( Parse( to, "{ \"x\": 0 }" ), Json::Status::kOk, "parse the second document" );
@@ -324,13 +334,13 @@ void TestOtherDocuments()
 // A Serialize that tries to edit the document it is building.
 struct Meddler
 {
-    V3::StructuredData*  data   = nullptr;
-    const V3::Value*     target = nullptr;
-    mutable Json::Status edit   = Json::Status::kOk;
-    mutable Json::Status build  = Json::Status::kOk;
+    Json::StructuredData* data   = nullptr;
+    const Json::Value*    target = nullptr;
+    mutable Json::Status  edit   = Json::Status::kOk;
+    mutable Json::Status  build  = Json::Status::kOk;
 };
 
-Json::Status Serialize( V3::Node node, const Meddler& meddler ) noexcept
+Json::Status Serialize( Json::Node node, const Meddler& meddler ) noexcept
 {
     meddler.edit  = meddler.data->AppendElement( *meddler.target, 1.0 );
     meddler.build = meddler.data->SerializeFrom( 2.0 );
@@ -340,8 +350,8 @@ Json::Status Serialize( V3::Node node, const Meddler& meddler ) noexcept
 
 void TestEditsDuringBuild()
 {
-    V3::StructuredData data;
-    Meddler            meddler;
+    Json::StructuredData data;
+    Meddler              meddler;
 
     CheckStatus( Parse( data, "[ 1 ]" ), Json::Status::kOk, "parse an array" );
 
@@ -359,7 +369,7 @@ void TestEditsDuringBuild()
 // Each edit either succeeds or is refused and leaves the written text as it was.
 bool RunEdits( CountingSource& source, int& refusedEdits )
 {
-    V3::StructuredData data( source );
+    Json::StructuredData data( source );
 
     const char*  text   = "{ \"array\": [ 1, 2, 3, 4 ], \"k0\": 0, \"k1\": 1, \"k2\": 2, \"k3\": 3, \"k4\": 4, \"k5\": 5, \"k6\": 6, \"k7\": 7 }";
     Json::Status status = Parse( data, text );
@@ -369,8 +379,8 @@ bool RunEdits( CountingSource& source, int& refusedEdits )
         return status == Json::Status::kAllocationRefused;
     }
 
-    const V3::Value& root = *data.GetRoot();
-    bool             same = true;
+    const Json::Value& root = *data.GetRoot();
+    bool               same = true;
 
     for ( int step = 0; same && ( step < 68 ); step++ )
     {

@@ -3,7 +3,6 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
-namespace V3   = Json::V3;
 
 #ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
 
@@ -22,7 +21,7 @@ DEFINE_JSON4C4_FUNCTIONS( TestFile01, PROTO )
 
 int main()
 {
-    V3::StructuredData jSd;
+    Json::StructuredData jSd;
 
     auto parseResult = jSd.Parse( "Data/Test/test_file01.json" );
 

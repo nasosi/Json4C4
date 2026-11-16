@@ -2,8 +2,6 @@
 
 #include <clocale>
 
-namespace V3 = Json::V3;
-
 int main()
 {
     const char* locales[] = { "de_DE.UTF-8", "de_DE.utf8", "de_DE", "fr_FR.UTF-8", "fr_FR.utf8", "German_Germany.1252", "German" };
@@ -25,7 +23,7 @@ int main()
         return testSkippedReturnCode;
     }
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, "[1.5,1e-3,-2.5E2]" ).status, Json::Status::kOk, "parse under a decimal comma locale" );
 
     Terathon::Array<double> numbers;

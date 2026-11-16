@@ -584,12 +584,12 @@ namespace C4
                                                     "Unterminated text buffer",
                                                     "Expected opening curly braces",
                                                     "Expected closing curly braces or comma",
-                                                    "Expected opening square braces",
-                                                    "Expected closing square braces or comma",
+                                                    "Expected opening square brackets",
+                                                    "Expected closing square brackets or comma",
                                                     "Illegal character",
                                                     "Illegal escape",
                                                     "Expected colon",
-                                                    "Expected begining double quotes",
+                                                    "Expected beginning double quotes",
                                                     "Expected ending double quotes",
                                                     "Invalid number",
                                                     "Expected 'true' or 'false'",
@@ -599,7 +599,6 @@ namespace C4
                                                     "File ends prematurely",
                                                     "Numbers cannot have leading zeros",
                                                     "JSON structure is invalid",
-                                                    "An expected object value pair was not found",
                                                     "An exception was caught",
                                                     "JSON structured data contains invalid value type",
                                                     "Could not find requested name of name/value pair",
@@ -636,12 +635,6 @@ namespace C4
         constexpr uint8 carriageReturn = 0x0D;
 
         constexpr double maxDouble = 1.7976931348623157e308;
-
-        class StringValue;
-        class NumberValue;
-        class BoolValue;
-        class NullValue;
-        class ArrayValue;
 
         Status ExpandArray( Array<char>& array, const char c, const uint32 n )
         {
@@ -934,158 +927,9 @@ namespace C4
             return ( textLength );
         }
 
-        class StringValue final : public Value
-        {
-        public:
-            using DataType = String<>;
-
-            DataType data;
-            ~StringValue() noexcept override { };
-
-            String<>* GetStringData() noexcept override
-            {
-                return &data;
-            }
-
-            const String<>* GetStringData() const noexcept override
-            {
-                return &data;
-            }
-
-            Status
-            Write( Array<char>& output, uint32 /*indentationLength*/, const char /*indentationChar*/, Array<char>& /*indentationCharArray*/ ) const override
-            {
-                return AppendEscapedString( output, data );
-            }
-        };
-
-        class NumberValue final : public Value
-        {
-        public:
-            using DataType = double;
-            DataType data  = 0;
-
-            ~NumberValue() override { };
-
-            double* GetDoubleData() noexcept override
-            {
-                return &data;
-            }
-
-            const double* GetDoubleData() const noexcept override
-            {
-                return &data;
-            }
-
-            Status
-            Write( Array<char>& output, uint32 /*indentationLength*/, const char /*indentationChar*/, Array<char>& /*indentationCharArray*/ ) const override
-            {
-                if ( !( data >= -maxDouble && data <= maxDouble ) )
-                {
-                    return Status::kFloatInvalid;
-                }
-
-                char text[ NUMBERTEXTTHREE_F64_MAX_CHARS ];
-
-                return AppendText( output, text, ntt_write_f64( data, text ) );
-            }
-        };
-
-        class BoolValue final : public Value
-        {
-        public:
-            using DataType = bool;
-            DataType data  = true;
-
-            ~BoolValue() override { };
-
-            bool* GetBoolData() noexcept override
-            {
-                return &data;
-            }
-
-            const bool* GetBoolData() const noexcept override
-            {
-                return &data;
-            }
-
-            Status Write( Array<char>& output, uint32, const char, Array<char>& ) const override
-            {
-                return AppendText( output, data ? "true" : "false" );
-            }
-        };
-
-        class NullValue final : public Value
-        {
-        public:
-            using DataType = Null;
-            DataType data;
-
-            ~NullValue() override { };
-
-            Null* GetJsonNullData() noexcept override
-            {
-                return &data;
-            }
-
-            const Null* GetJsonNullData() const noexcept override
-            {
-                return &data;
-            }
-
-            Status
-            Write( Array<char>& output, uint32 /*indentationLength*/, const char /*indentationChar*/, Array<char>& /*indentationCharArray*/ ) const override
-            {
-                return AppendText( output, "null" );
-            }
-        };
-
-        namespace Detail
-        {
-            template <>
-            Value* CreateValueFor( const String<>& ) noexcept( false )
-            {
-                return new StringValue;
-            }
-
-            template <>
-            Value* CreateValueFor( const double& ) noexcept( false )
-            {
-                return new NumberValue;
-            }
-
-            template <>
-            Value* CreateValueFor( const bool& ) noexcept( false )
-            {
-                return new BoolValue;
-            }
-
-            template <>
-            Value* CreateValueFor( const Null& ) noexcept( false )
-            {
-                return new NullValue;
-            }
-
-        } // namespace Detail
-
         // Objects with more members than this find a name through an index of member positions sorted by name, smaller
         // ones by comparing every name.
         constexpr int32 indexedMemberCount = 16;
-
-        // Orders names by their bytes, read as unsigned values.
-        int32 CompareNames( const char* first, const char* second ) noexcept
-        {
-            const uint8* a = reinterpret_cast<const uint8*>( first );
-            const uint8* b = reinterpret_cast<const uint8*>( second );
-
-            while ( ( a[ 0 ] == b[ 0 ] ) && ( a[ 0 ] != 0 ) )
-            {
-                a++;
-                b++;
-            }
-
-            return int32( a[ 0 ] ) - int32( b[ 0 ] );
-        }
 
         // How far back from the end the parser looks for a character that ends every string run.
         constexpr int32 stringStopSearchLength = 4096;
@@ -1319,842 +1163,6 @@ namespace C4
             }
         };
 
-        class Parser : public TextReader
-        {
-        public:
-            Parser( const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept : TextReader( begin, textEnd, parseOptions, false )
-            {
-            }
-
-            Status ParseValue( Value*& value, const char*& text, int32 depth ) noexcept
-            {
-                switch ( Peek( text ) )
-                {
-                    case '"':
-                        return ParseNew<StringValue>( value, text, depth );
-
-                    case '-':
-                    case '0':
-                    case '1':
-                    case '2':
-                    case '3':
-                    case '4':
-                    case '5':
-                    case '6':
-                    case '7':
-                    case '8':
-                    case '9':
-                        return ParseNew<NumberValue>( value, text, depth );
-
-                    case 't':
-                    case 'f':
-                        return ParseNew<BoolValue>( value, text, depth );
-
-                    case 'n':
-                        return ParseNew<NullValue>( value, text, depth );
-
-                    case '[':
-                        return ( depth < options.maxNestingDepth ) ? ParseNew<ArrayValue>( value, text, depth + 1 ) : Status::kMaximumNestingDepthExceeded;
-
-                    case '{':
-                        return ( depth < options.maxNestingDepth ) ? ParseNew<ObjectValue>( value, text, depth + 1 ) : Status::kMaximumNestingDepthExceeded;
-
-                    default:
-                        return Status::kExpectedJsonValue;
-                }
-            }
-
-        private:
-            // Where the names of the objects being parsed begin, for each member past their first indexedMemberCount.
-            Array<const char*> nameStarts;
-
-            Array<ObjectValue::NamedPosition> sortedNames;
-            Array<ObjectValue::NamedPosition> sortScratch;
-
-            Status ParseString( String<>& string, const char*& text ) noexcept
-            {
-                if ( Peek( text ) != '"' )
-                {
-                    return ( Status::kExpectedBeginingDoubleQuotes );
-                }
-
-                int32 textLength;
-                int32 stringLength;
-
-                Status status = ReadStringLiteral( text + 1, &textLength, &stringLength );
-                if ( status != Status::kOk )
-                {
-                    text += textLength + 1;
-                    return ( status );
-                }
-
-                status = CountStringBytes( stringLength );
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                text++;
-
-                status = MayThrow(
-                    [ & ]()
-                    {
-                        string.SetStringLength( stringLength );
-                        return Status::kOk;
-                    } );
-
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                if ( stringLength == textLength )
-                {
-                    CopyText( string, text, stringLength );
-                }
-                else
-                {
-                    ReadStringLiteral( text, &textLength, &stringLength, string );
-                }
-
-                text += textLength + 1;
-
-                return ( Status::kOk );
-            }
-
-            template <class T>
-            Status ParseNew( Value*& value, const char*& text, int32 depth ) noexcept
-            {
-                Status status = CountValue();
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                T* newValue = nullptr;
-
-                status = MayThrow(
-                    [ & ]()
-                    {
-                        newValue = new T;
-                        return Status::kOk;
-                    } );
-
-                if ( status == Status::kOk )
-                {
-                    status = Parse( newValue, text, depth );
-
-                    if ( status == Status::kOk )
-                    {
-                        value = newValue;
-                        return status;
-                    }
-
-                    delete newValue;
-                }
-
-                return status;
-            }
-
-            Status Parse( StringValue* value, const char*& text, int32 ) noexcept
-            {
-                return ParseString( value->data, text );
-            }
-
-            Status Parse( NumberValue* value, const char*& text, int32 ) const noexcept
-            {
-                return ReadNumber( value->data, text );
-            }
-
-            Status Parse( BoolValue* value, const char*& text, int32 ) const noexcept
-            {
-                return ReadBool( value->data, text );
-            }
-
-            Status Parse( NullValue*, const char*& text, int32 ) const noexcept
-            {
-                return ReadNull( text );
-            }
-
-            Status Parse( ArrayValue* array, const char*& text, int32 depth ) noexcept
-            {
-                bool emptyArray = true;
-
-                for ( ;; )
-                {
-                    text++;
-                    text = SkipWhitespace( text );
-
-                    if ( Peek( text ) == ']' )
-                    {
-                        if ( !emptyArray )
-                        {
-                            return Status::kExpectedJsonValue;
-                        }
-
-                        text++;
-
-                        return Status::kOk;
-                    }
-
-                    Value* element = nullptr;
-                    Status status  = ParseValue( element, text, depth );
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    status = MayThrow(
-                        [ & ]()
-                        {
-                            array->data.AppendArrayElement( element );
-                            return Status::kOk;
-                        } );
-
-                    if ( status != Status::kOk )
-                    {
-                        delete element;
-                        return status;
-                    }
-
-                    emptyArray = false;
-
-                    text = SkipWhitespace( text );
-
-                    if ( Peek( text ) != ',' )
-                    {
-                        break;
-                    }
-                }
-
-                if ( Peek( text ) != ']' )
-                {
-                    return Status::kExpectedClosingSquareBracketsOrComma;
-                }
-
-                text++;
-
-                return Status::kOk;
-            }
-
-            Status Parse( ObjectValue* object, const char*& text, int32 depth ) noexcept
-            {
-                int32  nameBase = nameStarts.GetArrayElementCount();
-                Status status   = ParseMembers( object, text, depth );
-
-                if ( ( status == Status::kOk ) && ( object->members.GetArrayElementCount() > indexedMemberCount ) )
-                {
-                    status = IndexMembers( object, text, nameBase );
-                }
-
-                nameStarts.SetArrayElementCount( nameBase );
-
-                return status;
-            }
-
-            Status ParseMembers( ObjectValue* object, const char*& text, int32 depth ) noexcept
-            {
-                bool emptyObject = true;
-
-                for ( ;; )
-                {
-                    text++;
-                    text = SkipWhitespace( text );
-
-                    if ( Peek( text ) == '}' )
-                    {
-                        if ( !emptyObject )
-                        {
-                            return Status::kExpectedJsonValue;
-                        }
-
-                        text++;
-
-                        return Status::kOk;
-                    }
-
-                    const char* nameStart = text;
-
-                    String<> name;
-                    Status   status = ParseString( name, text );
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    text = SkipWhitespace( text );
-
-                    if ( Peek( text ) != ':' )
-                    {
-                        return Status::kExpectedColon;
-                    }
-
-                    text++;
-                    text = SkipWhitespace( text );
-
-                    Value* member = nullptr;
-
-                    status = ParseValue( member, text, depth );
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    member->name = static_cast<String<>&&>( name );
-
-                    // Past the first members, IndexMembers finds the duplicate names once the object ends.
-                    bool  indexed  = object->members.GetArrayElementCount() >= indexedMemberCount;
-                    int32 position = indexed ? -1 : object->FindMemberPosition( member->name );
-
-                    if ( position < 0 )
-                    {
-                        status = MayThrow(
-                            [ & ]()
-                            {
-                                if ( indexed )
-                                {
-                                    nameStarts.AppendArrayElement( nameStart );
-                                }
-
-                                object->members.AppendArrayElement( member );
-                                return Status::kOk;
-                            } );
-
-                        if ( status != Status::kOk )
-                        {
-                            delete member;
-                            return status;
-                        }
-
-                        member->owner = object;
-                    }
-                    else if ( options.duplicateNames == DuplicateNames::kKeepLast )
-                    {
-                        object->ReplaceMember( position, member );
-                    }
-                    else
-                    {
-                        delete member;
-
-                        if ( options.duplicateNames == DuplicateNames::kReject )
-                        {
-                            text = nameStart;
-                            return Status::kDuplicateName;
-                        }
-                    }
-
-                    emptyObject = false;
-
-                    text = SkipWhitespace( text );
-
-                    if ( Peek( text ) != ',' )
-                    {
-                        break;
-                    }
-                }
-
-                if ( Peek( text ) != '}' )
-                {
-                    return Status::kExpectedClosingCurlyBracesOrComma;
-                }
-
-                text++;
-
-                return Status::kOk;
-            }
-
-            // Sorts the members of a large object by name and settles the duplicate names among them. With kReject, the
-            // duplicate reported is the earliest member whose name came before, as if each member were checked when read.
-            Status IndexMembers( ObjectValue* object, const char*& text, int32 nameBase ) noexcept
-            {
-                Status status = MayThrow(
-                    [ & ]()
-                    {
-                        object->BuildMemberIndex( sortedNames, sortScratch );
-                        return Status::kOk;
-                    } );
-
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                Array<Value*, 8>&                 members = object->members;
-                const ObjectValue::NamedPosition* sorted  = sortedNames.begin();
-                int32                             count   = members.GetArrayElementCount();
-                int32                             repeat  = count;
-                bool                              removed = false;
-
-                for ( int32 first = 0, next = 1; first < count; first = next++ )
-                {
-                    while ( ( next < count ) && ( CompareNames( sorted[ next ].name, sorted[ first ].name ) == 0 ) )
-                    {
-                        next++;
-                    }
-
-                    if ( next - first == 1 )
-                    {
-                        continue;
-                    }
-
-                    if ( options.duplicateNames == DuplicateNames::kReject )
-                    {
-                        repeat = ( sorted[ first + 1 ].position < repeat ) ? sorted[ first + 1 ].position : repeat;
-                        continue;
-                    }
-
-                    Value* kept = members[ sorted[ ( options.duplicateNames == DuplicateNames::kKeepLast ) ? next - 1 : first ].position ];
-
-                    for ( int32 a = first; a < next; a++ )
-                    {
-                        Value*& member = members[ sorted[ a ].position ];
-
-                        if ( member != kept )
-                        {
-                            member->owner = nullptr;
-                            delete member;
-                        }
-
-                        member = nullptr;
-                    }
-
-                    members[ sorted[ first ].position ] = kept;
-                    removed                             = true;
-                }
-
-                if ( repeat < count )
-                {
-                    text = nameStarts[ nameBase + repeat - indexedMemberCount ];
-                    return Status::kDuplicateName;
-                }
-
-                if ( removed )
-                {
-                    int32 keptCount = 0;
-
-                    for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
-                    {
-                        if ( members[ a ] )
-                        {
-                            members[ keptCount++ ] = members[ a ];
-                        }
-                    }
-
-                    members.SetArrayElementCount( keptCount );
-
-                    status = MayThrow(
-                        [ & ]()
-                        {
-                            object->BuildMemberIndex( sortedNames, sortScratch );
-                            return Status::kOk;
-                        } );
-                }
-
-                return status;
-            }
-        };
-
-        ArrayValue::~ArrayValue()
-        {
-            for ( auto pointer : data )
-            {
-                delete pointer;
-            }
-        };
-
-        Array<Value*>* ArrayValue::GetJsonValueArrayData() noexcept
-        {
-            return &data;
-        }
-
-        const Array<Value*>* ArrayValue::GetJsonValueArrayData() const noexcept
-        {
-            return &data;
-        }
-
-        Status ArrayValue::Write( Array<char>& output, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const
-        {
-            Status status = AppendText( output, "[\n" );
-
-            if ( status == Status::kOk )
-            {
-                status = ExpandArray( indentationCharArray, indentationChar, indentationLength );
-            }
-
-            for ( int32 a = 0; status == Status::kOk && a != data.GetArrayElementCount(); a++ )
-            {
-                status = AppendText( output, indentationCharArray.begin(), indentationCharArray.GetArrayElementCount() );
-
-                if ( status == Status::kOk )
-                {
-                    status = data[ a ]->Write( output, indentationLength, indentationChar, indentationCharArray );
-                }
-
-                if ( status == Status::kOk )
-                {
-                    status = AppendText( output, ( a < data.GetArrayElementCount() - 1 ) ? ",\n" : "\n" );
-                }
-            }
-
-            if ( status != Status::kOk )
-            {
-                return status;
-            }
-
-            indentationCharArray.SetArrayElementCount( indentationCharArray.GetArrayElementCount() - int32( indentationLength ) );
-
-            status = AppendText( output, indentationCharArray.begin(), indentationCharArray.GetArrayElementCount() );
-
-            return ( status == Status::kOk ) ? AppendText( output, "]", 1 ) : status;
-        }
-
-        Value::~Value() noexcept
-        {
-            Detach();
-        }
-
-        void Value::Detach() noexcept
-        {
-            if ( owner )
-            {
-                owner->RemoveMember( this );
-            }
-        }
-
-        int32 ObjectValue::FindIndexSlot( const char* key ) const noexcept
-        {
-            int32 low  = 0;
-            int32 high = memberIndex.GetArrayElementCount();
-
-            while ( low < high )
-            {
-                int32 middle = low + ( high - low ) / 2;
-
-                if ( CompareNames( members[ memberIndex[ middle ] ]->name, key ) < 0 )
-                {
-                    low = middle + 1;
-                }
-                else
-                {
-                    high = middle;
-                }
-            }
-
-            return low;
-        }
-
-        int32 ObjectValue::FindMemberPosition( const char* key ) const noexcept
-        {
-            if ( memberIndex.GetArrayElementCount() == 0 )
-            {
-                for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
-                {
-                    const String<>& memberName = members[ a ]->name;
-
-                    if ( ( memberName[ 0 ] == key[ 0 ] ) && ( memberName == key ) )
-                    {
-                        return a;
-                    }
-                }
-
-                return -1;
-            }
-
-            int32 slot = FindIndexSlot( key );
-
-            if ( ( slot < memberIndex.GetArrayElementCount() ) && ( members[ memberIndex[ slot ] ]->name == key ) )
-            {
-                return memberIndex[ slot ];
-            }
-
-            return -1;
-        }
-
-        // A merge sort, so that members with the same name stay in document order. The names are sorted with their
-        // positions, so that each comparison reads only the two names.
-        void ObjectValue::BuildMemberIndex( Array<NamedPosition>& sorted, Array<NamedPosition>& scratch )
-        {
-            int32 count = members.GetArrayElementCount();
-
-            sorted.SetArrayElementCount( count );
-            scratch.SetArrayElementCount( count );
-            memberIndex.SetArrayElementCount( count );
-
-            for ( int32 a = 0; a < count; a++ )
-            {
-                sorted[ a ] = NamedPosition { members[ a ]->name, a };
-            }
-
-            NamedPosition* from = sorted.begin();
-            NamedPosition* to   = scratch.begin();
-
-            for ( int32 width = 1; width < count; width *= 2 )
-            {
-                for ( int32 left = 0; left < count; left += 2 * width )
-                {
-                    int32 middle = ( count - left > width ) ? left + width : count;
-                    int32 right  = ( count - middle > width ) ? middle + width : count;
-                    int32 i      = left;
-                    int32 j      = middle;
-
-                    for ( int32 k = left; k < right; k++ )
-                    {
-                        bool takeLeft = ( j == right ) || ( ( i < middle ) && ( CompareNames( from[ i ].name, from[ j ].name ) <= 0 ) );
-                        to[ k ]       = takeLeft ? from[ i++ ] : from[ j++ ];
-                    }
-                }
-
-                NamedPosition* swap = from;
-                from                = to;
-                to                  = swap;
-            }
-
-            for ( int32 a = 0; a < count; a++ )
-            {
-                sorted[ a ]      = from[ a ];
-                memberIndex[ a ] = from[ a ].position;
-            }
-        }
-
-        void ObjectValue::AppendMember( Value* member )
-        {
-            int32 count = members.GetArrayElementCount() + 1;
-
-            members.ReserveArrayElementCount( count );
-
-            if ( ( count > indexedMemberCount ) && ( memberIndex.GetArrayElementCount() == 0 ) )
-            {
-                Array<NamedPosition> sorted;
-                Array<NamedPosition> scratch;
-
-                BuildMemberIndex( sorted, scratch );
-            }
-
-            if ( memberIndex.GetArrayElementCount() != 0 )
-            {
-                memberIndex.ReserveArrayElementCount( count );
-                memberIndex.InsertArrayElement( FindIndexSlot( member->name ), count - 1 );
-            }
-
-            members.AppendArrayElement( member );
-            member->owner = this;
-        }
-
-        void ObjectValue::ReplaceMember( int32 position, Value* member ) noexcept
-        {
-            Value* replaced = members[ position ];
-
-            replaced->owner = nullptr;
-            delete replaced;
-
-            members[ position ] = member;
-            member->owner       = this;
-        }
-
-        void ObjectValue::RemoveMember( Value* member ) noexcept
-        {
-            for ( int32 a = 0; a < members.GetArrayElementCount(); a++ )
-            {
-                if ( members[ a ] == member )
-                {
-                    members.RemoveArrayElement( a );
-                    member->owner = nullptr;
-
-                    int32 kept = 0;
-
-                    for ( int32 position : memberIndex )
-                    {
-                        if ( position != a )
-                        {
-                            memberIndex[ kept++ ] = position - ( position > a );
-                        }
-                    }
-
-                    memberIndex.SetArrayElementCount( kept );
-
-                    return;
-                }
-            }
-        }
-
-        bool ObjectValue::InsertAccountedMapElement( Value* element )
-        {
-            if ( FindMemberPosition( element->name ) >= 0 )
-            {
-                return false;
-            }
-
-            element->Detach();
-            AppendMember( element );
-
-            return true;
-        }
-
-        Value* ObjectValue::RemoveAccountedMapElement( const char* key ) noexcept
-        {
-            Value* element = FindMapElement( key );
-
-            if ( element )
-            {
-                element->Detach();
-            }
-
-            return element;
-        }
-
-        void ObjectValue::PurgeAccountedMap() noexcept
-        {
-            for ( Value* member : members )
-            {
-                member->owner = nullptr;
-                delete member;
-            }
-
-            members.PurgeArray();
-            memberIndex.PurgeArray();
-        }
-
-        ObjectValue::~ObjectValue() noexcept
-        {
-            PurgeAccountedMap();
-        }
-
-        ObjectValue* ObjectValue::AsJsonObjectValue() noexcept
-        {
-            return this;
-        }
-
-        const ObjectValue* ObjectValue::AsJsonObjectValue() const noexcept
-        {
-            return this;
-        }
-
-        Value* ObjectValue::FindMapElement( const char* key ) const noexcept
-        {
-            int32 position = FindMemberPosition( key );
-
-            return ( position >= 0 ) ? members[ position ] : nullptr;
-        }
-
-        Value* ObjectValue::FindValue( const char* key ) noexcept
-        {
-            return FindMapElement( key );
-        }
-
-        const Value* ObjectValue::FindValue( const char* key ) const noexcept
-        {
-            return FindMapElement( key );
-        }
-
-        const String<>* ObjectValue::FindString( const char* key ) const noexcept
-        {
-            if ( const Value* jsonValue = FindValue( key ) )
-            {
-                return jsonValue->GetDataAsPointerTo<String<>>();
-            }
-
-            return nullptr;
-        }
-
-        const double* ObjectValue::FindNumber( const char* key ) const noexcept
-        {
-            if ( const Value* jsonValue = FindValue( key ) )
-            {
-                return jsonValue->GetDataAsPointerTo<double>();
-            }
-
-            return nullptr;
-        }
-
-        const bool* ObjectValue::FindBool( const char* key ) const noexcept
-        {
-            if ( const Value* jsonValue = FindValue( key ) )
-            {
-                return jsonValue->GetDataAsPointerTo<bool>();
-            }
-
-            return nullptr;
-        }
-
-        const Null* ObjectValue::FindJsonNull( const char* key ) const noexcept
-        {
-            if ( const Value* jsonValue = FindValue( key ) )
-            {
-                return jsonValue->GetDataAsPointerTo<Null>();
-            }
-
-            return nullptr;
-        }
-
-        const Array<Value*>* ObjectValue::FindJsonValueArray( const char* key ) const noexcept
-        {
-            if ( const Value* jsonValue = FindValue( key ) )
-            {
-                return jsonValue->GetDataAsPointerTo<Array<Value*>>();
-            }
-
-            return nullptr;
-        }
-
-        const ObjectValue* ObjectValue::FindJsonObjectValue( const char* key ) const noexcept
-        {
-            if ( const Value* jsonValue = FindValue( key ) )
-            {
-                return jsonValue->AsJsonObjectValue();
-            }
-
-            return nullptr;
-        }
-
-        Status ObjectValue::Write( Array<char>& output, uint32 indentationLength, const char indentationChar, Array<char>& indentationCharArray ) const
-        {
-            int32  count  = members.GetArrayElementCount();
-            Status status = AppendText( output, "{\n" );
-
-            if ( status == Status::kOk )
-            {
-                status = ExpandArray( indentationCharArray, indentationChar, indentationLength );
-            }
-
-            for ( int32 a = 0; status == Status::kOk && a != count; a++ )
-            {
-                const Value* value = members[ a ];
-
-                status = AppendText( output, indentationCharArray.begin(), indentationCharArray.GetArrayElementCount() );
-
-                if ( status == Status::kOk )
-                {
-                    status = AppendEscapedString( output, value->name );
-                }
-
-                if ( status == Status::kOk )
-                {
-                    status = AppendText( output, " : " );
-                }
-
-                if ( status == Status::kOk )
-                {
-                    status = value->Write( output, indentationLength, indentationChar, indentationCharArray );
-                }
-
-                if ( status == Status::kOk )
-                {
-                    status = AppendText( output, ( a < count - 1 ) ? ",\n" : "\n" );
-                }
-            }
-
-            if ( status != Status::kOk )
-            {
-                return status;
-            }
-
-            indentationCharArray.SetArrayElementCount( indentationCharArray.GetArrayElementCount() - int32( indentationLength ) );
-
-            status = AppendText( output, indentationCharArray.begin(), indentationCharArray.GetArrayElementCount() );
-
-            return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
-        }
-
         void FindLineAndColumn( const char* begin, const char* end, const char* position, int32* line, int32* column ) noexcept
         {
             int32       lineNumber = 1;
@@ -2201,113 +1209,6 @@ namespace C4
             return status;
         }
 
-        Status ParseJsonRoot( Value*& jsonRoot, const char* begin, const char* end, const ParseOptions& options, int32* errorLine, int32* errorColumn ) noexcept
-        {
-            Parser parser( begin, end, options );
-            Status status = ParseRoot( parser, jsonRoot, begin, end, errorLine, errorColumn );
-
-            if ( status != Status::kOk )
-            {
-                delete jsonRoot;
-                jsonRoot = nullptr;
-            }
-
-            return status;
-        }
-
-        StructuredData::~StructuredData() noexcept
-        {
-            delete rootJsonValue;
-        }
-
-        ParseResult StructuredData::Parse( const char* fileName, const ParseOptions& options ) noexcept
-        {
-            delete rootJsonValue;
-            rootJsonValue = nullptr;
-
-            File       file;
-            FileStatus fileStatus = kFileOpenFailed;
-
-            MayThrow(
-                [ & ]()
-                {
-                    fileStatus = file.OpenFile( fileName, kFileReadOnly );
-                    return Status::kOk;
-                } );
-
-            if ( fileStatus != kFileOkay )
-            {
-                return ParseResult { Status::kFileOpenError, 0, 0 };
-            }
-
-            Terathon::uint64 fileSize = file.GetFileSize();
-
-            if ( fileSize > JSON4C4_MAX_FILE_SIZE )
-            {
-                return ParseResult { Status::kFileTooLarge, 0, 0 };
-            }
-
-            Array<char> nullTerminatedText;
-
-            Status status = MayThrow(
-                [ & ]()
-                {
-                    nullTerminatedText.SetArrayElementCount( int32( fileSize + 1 ), 0 );
-
-                    return Status::kOk;
-                } );
-
-            if ( status != Status::kOk )
-            {
-                return ParseResult { status, 0, 0 };
-            }
-
-            if ( file.ReadFile( nullTerminatedText.begin(), fileSize ) != kFileOkay )
-            {
-                return ParseResult { Status::kFileReadError, 0, 0 };
-            }
-
-            file.CloseFile();
-
-            return Parse( nullTerminatedText, options );
-        }
-
-        ParseResult StructuredData::Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options ) noexcept
-        {
-            int32 count = nullTerminatedTextBuffer.GetArrayElementCount();
-
-            if ( ( count >= 2 ) && ( nullTerminatedTextBuffer[ count - 1 ] != 0 ) )
-            {
-                delete rootJsonValue;
-                rootJsonValue = nullptr;
-
-                return ParseResult { Status::kUnterminatedTextBuffer, 0, 0 };
-            }
-
-            return ParseText( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
-        }
-
-        ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
-        {
-            delete rootJsonValue;
-            rootJsonValue = nullptr;
-
-            if ( ( text == nullptr ) || ( length == 0 ) )
-            {
-                return ParseResult { Status::kTextBufferContentsInvalid, 0, 0 };
-            }
-
-            if ( length > JSON4C4_MAX_FILE_SIZE )
-            {
-                return ParseResult { Status::kFileTooLarge, 0, 0 };
-            }
-
-            ParseResult parseResult;
-            parseResult.status = ParseJsonRoot( rootJsonValue, text, text + length, options, &parseResult.errorLine, &parseResult.errorColumn );
-
-            return parseResult;
-        }
-
         Status WriteTextFile( const char* fileName, const Array<char>& output ) noexcept
         {
 #ifdef C4_ENGINE_MODULE
@@ -2333,7 +1234,7 @@ namespace C4
             File       file;
             FileStatus fileStatus = kFileOpenFailed;
 
-            Status status = MayThrow(
+            Status status = Detail::MayThrow(
                 [ & ]()
                 {
                     if ( File::CanReplaceFile( fileName ) )
@@ -2373,7 +1274,7 @@ namespace C4
 
             bool replaced = false;
 
-            MayThrow(
+            Detail::MayThrow(
                 [ & ]()
                 {
                     replaced = written && File::MoveOverFile( temporaryName, fileName );
@@ -2391,41 +1292,6 @@ namespace C4
 #endif
         }
 
-        TERATHON_API Status StructuredData::Write( const char* fileName, const uint32 indentationLength, const char indentationChar ) noexcept
-        {
-            if ( !rootJsonValue )
-            {
-                return Status::kInvalidStructuredData;
-            }
-
-            Array<char> output;
-
-            Status status = MayThrow(
-                [ & ]()
-                {
-                    Array<char> indentCharArray;
-
-                    return rootJsonValue->Write( output, indentationLength, indentationChar, indentCharArray );
-                } );
-
-            if ( status != Status::kOk )
-            {
-                return status;
-            }
-
-            return WriteTextFile( fileName, output );
-        }
-
-        const Value* StructuredData::GetRootJsonValue() const noexcept
-        {
-            return rootJsonValue;
-        }
-
-        Value* StructuredData::GetRootJsonValue() noexcept
-        {
-            return rootJsonValue;
-        }
-
         String<256> ParseResultToString( const ParseResult& parseResult ) noexcept
         {
             String<256> string = StatusToString( parseResult.status );
@@ -2441,2506 +1307,2364 @@ namespace C4
             return string;
         }
 
-#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
+        static_assert( sizeof( Member ) == 32, "A member takes 32 bytes" );
 
-        namespace Detail
+        class DefaultBlockSource final : public BlockSource
         {
-            template <>
-            Value* CreateValueFor( const std::string& )
+        public:
+            void* AllocateBlock( uint64 size ) noexcept override
             {
-                return new StringValue;
-            }
-        } // namespace Detail
+                uint64* block = nullptr;
 
-        template <>
-        TERATHON_API Status Validate( const Value* value, const std::string& /*data*/ ) noexcept
-        {
-            const String<>* valueData = value->GetDataAsPointerTo<String<>>();
-
-            if ( !valueData )
-            {
-                return Status::kInvalidValueType;
-            }
-
-            return Status::kOk;
-        }
-
-        template <>
-        TERATHON_API Status Deserialize( const Value* value, std::string& data ) noexcept
-        {
-            const String<>* valueData = value->GetDataAsPointerTo<String<>>();
-
-            if ( !valueData )
-            {
-                return Status::kInvalidValueType;
-            }
-
-            return MayThrow(
-                [ & ]()
+                if ( size <= ( machine_address( -1 ) >> 1 ) )
                 {
-                    data = static_cast<const char*>( *valueData );
-
-                    return Status::kOk;
-                } );
-        }
-
-        template <>
-        TERATHON_API Status Serialize( Value* value, const std::string& data ) noexcept
-        {
-            String<>* valueData = value->GetDataAsPointerTo<String<>>();
-
-            if ( !valueData )
-            {
-                return Status::kInvalidValueType;
-            }
-
-            return MayThrow(
-                [ & ]()
-                {
-                    String<> copy( data.c_str() );
-                    *valueData = static_cast<String<>&&>( copy );
-
-                    return Status::kOk;
-                } );
-        }
-
-#endif
-
-        namespace V3
-        {
-            static_assert( sizeof( Value ) == 16, "A value takes 16 bytes" );
-            static_assert( sizeof( Member ) == 32, "A member takes 32 bytes" );
-
-            class DefaultBlockSource final : public BlockSource
-            {
-            public:
-                void* AllocateBlock( uint64 size ) noexcept override
-                {
-                    uint64* block = nullptr;
-
-                    if ( size <= ( machine_address( -1 ) >> 1 ) )
-                    {
-                        MayThrow(
-                            [ & ]()
-                            {
-                                block = new uint64[ machine( size / 8 ) ];
-                                return Status::kOk;
-                            } );
-                    }
-
-                    return block;
+                    Detail::MayThrow(
+                        [ & ]()
+                        {
+                            block = new uint64[ machine( size / 8 ) ];
+                            return Status::kOk;
+                        } );
                 }
 
-                void FreeBlock( void* block, uint64 ) noexcept override
-                {
-                    delete[] static_cast<uint64*>( block );
-                }
-            };
-
-            DefaultBlockSource defaultBlockSource;
-
-            BlockSource& GetDefaultBlockSource() noexcept
-            {
-                return defaultBlockSource;
+                return block;
             }
 
-            constexpr uint64 smallestBlockSize       = 1024;
-            constexpr uint64 largestGrowingBlockSize = 0x10000000;
-            constexpr uint64 smallestStackSize       = 4096;
-
-            inline uint64 RoundUpToEight( uint64 size ) noexcept
+            void FreeBlock( void* block, uint64 ) noexcept override
             {
-                return ( size + 7 ) & ~uint64( 7 );
+                delete[] static_cast<uint64*>( block );
+            }
+        };
+
+        DefaultBlockSource defaultBlockSource;
+
+        BlockSource& GetDefaultBlockSource() noexcept
+        {
+            return defaultBlockSource;
+        }
+
+        constexpr uint64 smallestBlockSize       = 1024;
+        constexpr uint64 largestGrowingBlockSize = 0x10000000;
+        constexpr uint64 smallestStackSize       = 4096;
+
+        inline uint64 RoundUpToEight( uint64 size ) noexcept
+        {
+            return ( size + 7 ) & ~uint64( 7 );
+        }
+
+        // Copies a count of bytes that is a multiple of 8 between blocks aligned to 8 bytes.
+        inline void CopyWords( void* restrict destination, const void* restrict source, uint64 byteCount ) noexcept
+        {
+            uint64*       to   = static_cast<uint64*>( destination );
+            const uint64* from = static_cast<const uint64*>( source );
+
+            for ( uint64 a = 0; a < byteCount / 8; a++ )
+            {
+                to[ a ] = from[ a ];
+            }
+        }
+
+        inline bool SameName( const char* first, uint32 firstLength, const char* second, uint32 secondLength ) noexcept
+        {
+            if ( firstLength != secondLength )
+            {
+                return false;
             }
 
-            // Copies a count of bytes that is a multiple of 8 between blocks aligned to 8 bytes.
-            inline void CopyWords( void* restrict destination, const void* restrict source, uint64 byteCount ) noexcept
+            for ( uint32 a = 0; a < firstLength; a++ )
             {
-                uint64*       to   = static_cast<uint64*>( destination );
-                const uint64* from = static_cast<const uint64*>( source );
-
-                for ( uint64 a = 0; a < byteCount / 8; a++ )
-                {
-                    to[ a ] = from[ a ];
-                }
-            }
-
-            inline bool SameName( const char* first, uint32 firstLength, const char* second, uint32 secondLength ) noexcept
-            {
-                if ( firstLength != secondLength )
+                if ( first[ a ] != second[ a ] )
                 {
                     return false;
                 }
+            }
 
-                for ( uint32 a = 0; a < firstLength; a++ )
+            return true;
+        }
+
+        inline bool SameName( const StringView& first, const StringView& second ) noexcept
+        {
+            return SameName( first.GetText(), first.GetLength(), second.GetText(), second.GetLength() );
+        }
+
+        // Whether the text of a number, which ends at stop, has neither a fraction nor an exponent.
+        inline bool IsIntegerText( const char* text, const char* stop ) noexcept
+        {
+            text += ( text != stop ) && ( text[ 0 ] == '-' );
+
+            while ( ( text != stop ) && IsDigit( uint8( text[ 0 ] ) ) )
+            {
+                text++;
+            }
+
+            return text == stop;
+        }
+
+        // Orders names by their bytes, read as unsigned values, and a name before the longer names it begins.
+        int32 CompareNames( const char* first, uint32 firstLength, const char* second, uint32 secondLength ) noexcept
+        {
+            const uint8* a      = reinterpret_cast<const uint8*>( first );
+            const uint8* b      = reinterpret_cast<const uint8*>( second );
+            uint32       length = ( firstLength < secondLength ) ? firstLength : secondLength;
+
+            for ( uint32 i = 0; i < length; i++ )
+            {
+                if ( a[ i ] != b[ i ] )
                 {
-                    if ( first[ a ] != second[ a ] )
+                    return int32( a[ i ] ) - int32( b[ i ] );
+                }
+            }
+
+            return ( firstLength < secondLength ) ? -1 : int32( firstLength > secondLength );
+        }
+
+        bool StringView::operator==( const StringView& other ) const noexcept
+        {
+            if ( !text || !other.text )
+            {
+                return !text && !other.text;
+            }
+
+            return SameName( *this, other );
+        }
+
+        bool StringView::operator==( const char* other ) const noexcept
+        {
+            if ( !text || !other )
+            {
+                return !text && !other;
+            }
+
+            for ( uint32 a = 0; a < length; a++ )
+            {
+                if ( ( other[ a ] == 0 ) || ( other[ a ] != text[ a ] ) )
+                {
+                    return false;
+                }
+            }
+
+            return other[ length ] == 0;
+        }
+
+        // The place in the index of a large object where a name is, or would go.
+        uint32 FindIndexSlot( const Member* members, const uint32* index, uint32 count, const char* name, uint32 length ) noexcept
+        {
+            uint32 low  = 0;
+            uint32 high = count;
+
+            while ( low < high )
+            {
+                uint32            middle     = low + ( high - low ) / 2;
+                const StringView& memberName = members[ index[ middle ] ].GetName();
+
+                if ( CompareNames( memberName.GetText(), memberName.GetLength(), name, length ) < 0 )
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+
+            return low;
+        }
+
+        const Value* ObjectView::Find( const char* name, uint32 length ) const noexcept
+        {
+            if ( !object || !name )
+            {
+                return nullptr;
+            }
+
+            const Member* members = object->data.members;
+            uint32        count   = object->count;
+
+            if ( count <= uint32( indexedMemberCount ) )
+            {
+                for ( uint32 a = 0; a < count; a++ )
+                {
+                    if ( SameName( members[ a ].name.GetText(), members[ a ].name.GetLength(), name, length ) )
                     {
-                        return false;
+                        return &members[ a ].value;
                     }
                 }
 
-                return true;
+                return nullptr;
             }
 
-            inline bool SameName( const StringView& first, const StringView& second ) noexcept
+            const uint32* index = reinterpret_cast<const uint32*>( members + object->GetCapacity() );
+            uint32        slot  = FindIndexSlot( members, index, count, name, length );
+
+            if ( slot == count )
             {
-                return SameName( first.GetText(), first.GetLength(), second.GetText(), second.GetLength() );
+                return nullptr;
             }
 
-            // Whether the text of a number, which ends at stop, has neither a fraction nor an exponent.
-            inline bool IsIntegerText( const char* text, const char* stop ) noexcept
-            {
-                text += ( text != stop ) && ( text[ 0 ] == '-' );
+            const Member& member = members[ index[ slot ] ];
 
-                while ( ( text != stop ) && IsDigit( uint8( text[ 0 ] ) ) )
+            return SameName( member.name.GetText(), member.name.GetLength(), name, length ) ? &member.value : nullptr;
+        }
+
+        const Value* ObjectView::Find( const char* name ) const noexcept
+        {
+            return name ? Find( name, uint32( Text::GetTextLength( name ) ) ) : nullptr;
+        }
+
+        StructuredData::StructuredData( BlockSource& source ) noexcept : blockSource( &source ), nextBlockSize( smallestBlockSize )
+        {
+        }
+
+        StructuredData::~StructuredData() noexcept
+        {
+            Clear();
+        }
+
+        void StructuredData::Clear() noexcept
+        {
+            while ( blocks )
+            {
+                Block* next = blocks->next;
+                blockSource->FreeBlock( blocks, blocks->size );
+                blocks = next;
+            }
+
+            blockTop      = nullptr;
+            blockEnd      = nullptr;
+            nextBlockSize = smallestBlockSize;
+            root          = nullptr;
+        }
+
+        // Sizes are multiples of 8, and values, arrays and members are taken from the bottom of the free space of the
+        // current block, so they stay aligned, and string bytes from its top.
+        void* StructuredData::AllocateAligned( uint64 size ) noexcept
+        {
+            if ( uint64( blockEnd - blockTop ) >= size )
+            {
+                char* memory = blockTop;
+                blockTop += size;
+
+                return memory;
+            }
+
+            return AllocateInNewBlock( size, true );
+        }
+
+        char* StructuredData::AllocateBytes( uint64 size ) noexcept
+        {
+            if ( uint64( blockEnd - blockTop ) >= size )
+            {
+                blockEnd -= size;
+
+                return blockEnd;
+            }
+
+            return static_cast<char*>( AllocateInNewBlock( size, false ) );
+        }
+
+        // A request larger than half the next block gets a block of its own, and the current block keeps its free
+        // space. When the source refuses a block, smaller ones are asked for, and blocks stop growing.
+        void* StructuredData::AllocateInNewBlock( uint64 size, bool aligned ) noexcept
+        {
+            uint64 ownSize   = sizeof( Block ) + RoundUpToEight( size );
+            uint64 blockSize = ( ownSize > nextBlockSize / 2 ) ? ownSize : nextBlockSize;
+            Block* block     = static_cast<Block*>( blockSource->AllocateBlock( blockSize ) );
+            bool   refused   = !block;
+
+            while ( !block && ( blockSize > ownSize ) )
+            {
+                blockSize = ( blockSize / 2 > ownSize ) ? RoundUpToEight( blockSize / 2 ) : ownSize;
+                block     = static_cast<Block*>( blockSource->AllocateBlock( blockSize ) );
+            }
+
+            if ( !block )
+            {
+                return nullptr;
+            }
+
+            block->next = blocks;
+            block->size = blockSize;
+            blocks      = block;
+
+            char* memory = reinterpret_cast<char*>( block + 1 );
+
+            if ( refused )
+            {
+                nextBlockSize = ( blockSize > smallestBlockSize ) ? blockSize : smallestBlockSize;
+            }
+
+            if ( blockSize == ownSize )
+            {
+                return memory;
+            }
+
+            blockTop = memory;
+            blockEnd = reinterpret_cast<char*>( block ) + blockSize;
+
+            if ( !refused && ( nextBlockSize < largestGrowingBlockSize ) )
+            {
+                nextBlockSize *= 2;
+            }
+
+            return aligned ? AllocateAligned( size ) : AllocateBytes( size );
+        }
+
+        // The parser's stack of the elements and members of the arrays and objects being read, in blocks from the
+        // document's block source, handed back when the parse ends. Everything on it is a multiple of 8 bytes.
+        class ScratchStack
+        {
+        public:
+            explicit ScratchStack( BlockSource& source ) noexcept : blockSource( source )
+            {
+            }
+
+            ~ScratchStack() noexcept
+            {
+                if ( base )
                 {
-                    text++;
+                    blockSource.FreeBlock( base, capacity );
+                }
+            }
+
+            ScratchStack( const ScratchStack& )            = delete;
+            ScratchStack& operator=( const ScratchStack& ) = delete;
+
+            uint64 GetSize() const noexcept
+            {
+                return size;
+            }
+
+            void SetSize( uint64 stackSize ) noexcept
+            {
+                size = stackSize;
+            }
+
+            template <class T>
+            T* At( uint64 offset ) noexcept
+            {
+                return reinterpret_cast<T*>( base + offset );
+            }
+
+            bool Reserve( uint64 extra ) noexcept
+            {
+                if ( capacity - size >= extra )
+                {
+                    return true;
                 }
 
-                return text == stop;
-            }
+                uint64 needed = RoundUpToEight( size + extra );
+                uint64 grown  = ( capacity != 0 ) ? capacity * 2 : smallestStackSize;
 
-            // Orders names by their bytes, read as unsigned values, and a name before the longer names it begins.
-            int32 CompareNames( const char* first, uint32 firstLength, const char* second, uint32 secondLength ) noexcept
-            {
-                const uint8* a      = reinterpret_cast<const uint8*>( first );
-                const uint8* b      = reinterpret_cast<const uint8*>( second );
-                uint32       length = ( firstLength < secondLength ) ? firstLength : secondLength;
-
-                for ( uint32 i = 0; i < length; i++ )
+                while ( grown < needed )
                 {
-                    if ( a[ i ] != b[ i ] )
-                    {
-                        return int32( a[ i ] ) - int32( b[ i ] );
-                    }
+                    grown *= 2;
                 }
 
-                return ( firstLength < secondLength ) ? -1 : int32( firstLength > secondLength );
-            }
+                char* block = static_cast<char*>( blockSource.AllocateBlock( grown ) );
 
-            bool StringView::operator==( const StringView& other ) const noexcept
-            {
-                if ( !text || !other.text )
+                while ( !block && ( grown > needed ) )
                 {
-                    return !text && !other.text;
-                }
-
-                return SameName( *this, other );
-            }
-
-            bool StringView::operator==( const char* other ) const noexcept
-            {
-                if ( !text || !other )
-                {
-                    return !text && !other;
-                }
-
-                for ( uint32 a = 0; a < length; a++ )
-                {
-                    if ( ( other[ a ] == 0 ) || ( other[ a ] != text[ a ] ) )
-                    {
-                        return false;
-                    }
-                }
-
-                return other[ length ] == 0;
-            }
-
-            // The place in the index of a large object where a name is, or would go.
-            uint32 FindIndexSlot( const Member* members, const uint32* index, uint32 count, const char* name, uint32 length ) noexcept
-            {
-                uint32 low  = 0;
-                uint32 high = count;
-
-                while ( low < high )
-                {
-                    uint32            middle     = low + ( high - low ) / 2;
-                    const StringView& memberName = members[ index[ middle ] ].GetName();
-
-                    if ( CompareNames( memberName.GetText(), memberName.GetLength(), name, length ) < 0 )
-                    {
-                        low = middle + 1;
-                    }
-                    else
-                    {
-                        high = middle;
-                    }
-                }
-
-                return low;
-            }
-
-            const Value* ObjectView::Find( const char* name, uint32 length ) const noexcept
-            {
-                if ( !object || !name )
-                {
-                    return nullptr;
-                }
-
-                const Member* members = object->data.members;
-                uint32        count   = object->count;
-
-                if ( count <= uint32( indexedMemberCount ) )
-                {
-                    for ( uint32 a = 0; a < count; a++ )
-                    {
-                        if ( SameName( members[ a ].name.GetText(), members[ a ].name.GetLength(), name, length ) )
-                        {
-                            return &members[ a ].value;
-                        }
-                    }
-
-                    return nullptr;
-                }
-
-                const uint32* index = reinterpret_cast<const uint32*>( members + object->GetCapacity() );
-                uint32        slot  = FindIndexSlot( members, index, count, name, length );
-
-                if ( slot == count )
-                {
-                    return nullptr;
-                }
-
-                const Member& member = members[ index[ slot ] ];
-
-                return SameName( member.name.GetText(), member.name.GetLength(), name, length ) ? &member.value : nullptr;
-            }
-
-            const Value* ObjectView::Find( const char* name ) const noexcept
-            {
-                return name ? Find( name, uint32( Text::GetTextLength( name ) ) ) : nullptr;
-            }
-
-            StructuredData::StructuredData( BlockSource& source ) noexcept : blockSource( &source ), nextBlockSize( smallestBlockSize )
-            {
-            }
-
-            StructuredData::~StructuredData() noexcept
-            {
-                Clear();
-            }
-
-            void StructuredData::Clear() noexcept
-            {
-                while ( blocks )
-                {
-                    Block* next = blocks->next;
-                    blockSource->FreeBlock( blocks, blocks->size );
-                    blocks = next;
-                }
-
-                blockTop      = nullptr;
-                blockEnd      = nullptr;
-                nextBlockSize = smallestBlockSize;
-                root          = nullptr;
-            }
-
-            // Sizes are multiples of 8, and values, arrays and members are taken from the bottom of the free space of the
-            // current block, so they stay aligned, and string bytes from its top.
-            void* StructuredData::AllocateAligned( uint64 size ) noexcept
-            {
-                if ( uint64( blockEnd - blockTop ) >= size )
-                {
-                    char* memory = blockTop;
-                    blockTop += size;
-
-                    return memory;
-                }
-
-                return AllocateInNewBlock( size, true );
-            }
-
-            char* StructuredData::AllocateBytes( uint64 size ) noexcept
-            {
-                if ( uint64( blockEnd - blockTop ) >= size )
-                {
-                    blockEnd -= size;
-
-                    return blockEnd;
-                }
-
-                return static_cast<char*>( AllocateInNewBlock( size, false ) );
-            }
-
-            // A request larger than half the next block gets a block of its own, and the current block keeps its free
-            // space. When the source refuses a block, smaller ones are asked for, and blocks stop growing.
-            void* StructuredData::AllocateInNewBlock( uint64 size, bool aligned ) noexcept
-            {
-                uint64 ownSize   = sizeof( Block ) + RoundUpToEight( size );
-                uint64 blockSize = ( ownSize > nextBlockSize / 2 ) ? ownSize : nextBlockSize;
-                Block* block     = static_cast<Block*>( blockSource->AllocateBlock( blockSize ) );
-                bool   refused   = !block;
-
-                while ( !block && ( blockSize > ownSize ) )
-                {
-                    blockSize = ( blockSize / 2 > ownSize ) ? RoundUpToEight( blockSize / 2 ) : ownSize;
-                    block     = static_cast<Block*>( blockSource->AllocateBlock( blockSize ) );
+                    grown = ( grown / 2 > needed ) ? RoundUpToEight( grown / 2 ) : needed;
+                    block = static_cast<char*>( blockSource.AllocateBlock( grown ) );
                 }
 
                 if ( !block )
                 {
-                    return nullptr;
-                }
-
-                block->next = blocks;
-                block->size = blockSize;
-                blocks      = block;
-
-                char* memory = reinterpret_cast<char*>( block + 1 );
-
-                if ( refused )
-                {
-                    nextBlockSize = ( blockSize > smallestBlockSize ) ? blockSize : smallestBlockSize;
-                }
-
-                if ( blockSize == ownSize )
-                {
-                    return memory;
-                }
-
-                blockTop = memory;
-                blockEnd = reinterpret_cast<char*>( block ) + blockSize;
-
-                if ( !refused && ( nextBlockSize < largestGrowingBlockSize ) )
-                {
-                    nextBlockSize *= 2;
-                }
-
-                return aligned ? AllocateAligned( size ) : AllocateBytes( size );
-            }
-
-            // The parser's stack of the elements and members of the arrays and objects being read, in blocks from the
-            // document's block source, handed back when the parse ends. Everything on it is a multiple of 8 bytes.
-            class ScratchStack
-            {
-            public:
-                explicit ScratchStack( BlockSource& source ) noexcept : blockSource( source )
-                {
-                }
-
-                ~ScratchStack() noexcept
-                {
-                    if ( base )
-                    {
-                        blockSource.FreeBlock( base, capacity );
-                    }
-                }
-
-                ScratchStack( const ScratchStack& )            = delete;
-                ScratchStack& operator=( const ScratchStack& ) = delete;
-
-                uint64 GetSize() const noexcept
-                {
-                    return size;
-                }
-
-                void SetSize( uint64 stackSize ) noexcept
-                {
-                    size = stackSize;
-                }
-
-                template <class T>
-                T* At( uint64 offset ) noexcept
-                {
-                    return reinterpret_cast<T*>( base + offset );
-                }
-
-                bool Reserve( uint64 extra ) noexcept
-                {
-                    if ( capacity - size >= extra )
-                    {
-                        return true;
-                    }
-
-                    uint64 needed = RoundUpToEight( size + extra );
-                    uint64 grown  = ( capacity != 0 ) ? capacity * 2 : smallestStackSize;
-
-                    while ( grown < needed )
-                    {
-                        grown *= 2;
-                    }
-
-                    char* block = static_cast<char*>( blockSource.AllocateBlock( grown ) );
-
-                    while ( !block && ( grown > needed ) )
-                    {
-                        grown = ( grown / 2 > needed ) ? RoundUpToEight( grown / 2 ) : needed;
-                        block = static_cast<char*>( blockSource.AllocateBlock( grown ) );
-                    }
-
-                    if ( !block )
-                    {
-                        return false;
-                    }
-
-                    if ( base )
-                    {
-                        CopyWords( block, base, size );
-                        blockSource.FreeBlock( base, capacity );
-                    }
-
-                    base     = block;
-                    capacity = grown;
-
-                    return true;
-                }
-
-                template <class T>
-                bool Push( const T& item ) noexcept
-                {
-                    if ( !Reserve( sizeof( T ) ) )
-                    {
-                        return false;
-                    }
-
-                    *reinterpret_cast<T*>( base + size ) = item;
-                    size += sizeof( T );
-
-                    return true;
-                }
-
-            private:
-                BlockSource& blockSource;
-                char*        base     = nullptr;
-                uint64       capacity = 0;
-                uint64       size     = 0;
-            };
-
-            struct PendingMember
-            {
-                Member      member;
-                const char* nameStart;
-            };
-
-            // The elements and members of the arrays and objects being parsed or built. Each array and object collects them
-            // on a stack in blocks from the document's block source and copies them into the document once, at their exact
-            // count, when it closes.
-            class PendingValues
-            {
-            public:
-                explicit PendingValues( StructuredData& data ) noexcept : document( data ), stack( *data.blockSource )
-                {
-                }
-
-                uint64 GetSize() const noexcept
-                {
-                    return stack.GetSize();
-                }
-
-                uint32 GetMemberCount( uint64 base ) const noexcept
-                {
-                    return uint32( ( stack.GetSize() - base ) / sizeof( PendingMember ) );
-                }
-
-                template <class T>
-                T* At( uint64 offset ) noexcept
-                {
-                    return stack.At<T>( offset );
-                }
-
-                template <class T>
-                bool Push( const T& item ) noexcept
-                {
-                    return stack.Push( item );
-                }
-
-                int32 FindName( uint64 base, const StringView& name ) noexcept
-                {
-                    const PendingMember* pending = stack.At<PendingMember>( base );
-                    uint32               count   = GetMemberCount( base );
-
-                    for ( uint32 a = 0; a < count; a++ )
-                    {
-                        if ( SameName( pending[ a ].member.name, name ) )
-                        {
-                            return int32( a );
-                        }
-                    }
-
-                    return -1;
-                }
-
-                Status CloseArray( Value& array, uint64 base ) noexcept
-                {
-                    uint32 count    = uint32( ( stack.GetSize() - base ) / sizeof( Value ) );
-                    Value* elements = nullptr;
-
-                    if ( count != 0 )
-                    {
-                        elements = static_cast<Value*>( document.AllocateAligned( uint64( count ) * sizeof( Value ) ) );
-
-                        if ( !elements )
-                        {
-                            return Status::kAllocationRefused;
-                        }
-
-                        CopyWords( elements, stack.At<Value>( base ), uint64( count ) * sizeof( Value ) );
-                    }
-
-                    array.type          = Type::kArray;
-                    array.count         = count;
-                    array.data.elements = elements;
-
-                    stack.SetSize( base );
-
-                    return Status::kOk;
-                }
-
-                // With kReject a repeated name fails, and repeated is set to where the name of the earliest repeat begins.
-                Status CloseObject( Value& object, uint64 base, DuplicateNames duplicateNames, const char*& repeated ) noexcept
-                {
-                    uint32        count  = GetMemberCount( base );
-                    const uint32* index  = nullptr;
-                    Status        status = Status::kOk;
-
-                    if ( count > uint32( indexedMemberCount ) )
-                    {
-                        status = SettleNames( base, count, index, duplicateNames, repeated );
-                    }
-
-                    if ( status == Status::kOk )
-                    {
-                        status = CopyMembers( object, base, count, index );
-                    }
-
-                    stack.SetSize( base );
-
-                    return status;
-                }
-
-            private:
-                struct NamedPosition
-                {
-                    const char* name;
-                    uint32      length;
-                    uint32      position;
-                };
-
-                StructuredData& document;
-                ScratchStack    stack;
-
-                // A merge sort, so that members with the same name stay in document order. Returns the array that holds
-                // the sorted names.
-                static NamedPosition* SortByName( NamedPosition* names, NamedPosition* scratch, uint32 count ) noexcept
-                {
-                    NamedPosition* from = names;
-                    NamedPosition* to   = scratch;
-
-                    for ( uint32 width = 1; width < count; width *= 2 )
-                    {
-                        for ( uint32 left = 0; left < count; left += 2 * width )
-                        {
-                            uint32 middle = ( count - left > width ) ? left + width : count;
-                            uint32 right  = ( count - middle > width ) ? middle + width : count;
-                            uint32 i      = left;
-                            uint32 j      = middle;
-
-                            for ( uint32 k = left; k < right; k++ )
-                            {
-                                bool takeLeft =
-                                    ( j == right ) ||
-                                    ( ( i < middle ) && ( CompareNames( from[ i ].name, from[ i ].length, from[ j ].name, from[ j ].length ) <= 0 ) );
-                                to[ k ] = takeLeft ? from[ i++ ] : from[ j++ ];
-                            }
-                        }
-
-                        NamedPosition* swap = from;
-                        from                = to;
-                        to                  = swap;
-                    }
-
-                    return from;
-                }
-
-                // Sorts the members of a large object by name and settles the duplicate names among them. With kReject, the
-                // duplicate reported is the earliest member whose name came before, as if each member were checked when
-                // read. The positions of the members in name order are left in index.
-                Status SettleNames( uint64 base, uint32& count, const uint32*& index, DuplicateNames duplicateNames, const char*& repeated ) noexcept
-                {
-                    uint64 namesOffset = base + uint64( count ) * sizeof( PendingMember );
-
-                    if ( !stack.Reserve( uint64( count ) * 2 * sizeof( NamedPosition ) ) )
-                    {
-                        return Status::kAllocationRefused;
-                    }
-
-                    PendingMember* pending = stack.At<PendingMember>( base );
-                    NamedPosition* names   = stack.At<NamedPosition>( namesOffset );
-                    NamedPosition* scratch = names + count;
-
-                    for ( uint32 a = 0; a < count; a++ )
-                    {
-                        names[ a ] = NamedPosition { pending[ a ].member.name.GetText(), pending[ a ].member.name.GetLength(), a };
-                    }
-
-                    const NamedPosition* sorted    = SortByName( names, scratch, count );
-                    uint32*              positions = reinterpret_cast<uint32*>( ( sorted == names ) ? scratch : names );
-                    uint32               repeat    = count;
-                    bool                 removed   = false;
-
-                    for ( uint32 first = 0, next = 1; first < count; first = next++ )
-                    {
-                        while ( ( next < count ) && SameName( sorted[ next ].name, sorted[ next ].length, sorted[ first ].name, sorted[ first ].length ) )
-                        {
-                            next++;
-                        }
-
-                        if ( next - first == 1 )
-                        {
-                            continue;
-                        }
-
-                        if ( duplicateNames == DuplicateNames::kReject )
-                        {
-                            repeat = ( sorted[ first + 1 ].position < repeat ) ? sorted[ first + 1 ].position : repeat;
-                            continue;
-                        }
-
-                        uint32 kept = sorted[ ( duplicateNames == DuplicateNames::kKeepLast ) ? next - 1 : first ].position;
-
-                        pending[ sorted[ first ].position ].member.value = pending[ kept ].member.value;
-
-                        for ( uint32 a = first + 1; a < next; a++ )
-                        {
-                            pending[ sorted[ a ].position ].nameStart = nullptr;
-                        }
-
-                        removed = true;
-                    }
-
-                    if ( repeat < count )
-                    {
-                        repeated = pending[ repeat ].nameStart;
-                        return Status::kDuplicateName;
-                    }
-
-                    uint32* sortedPositions = positions + count;
-
-                    if ( removed )
-                    {
-                        uint32* newPosition = positions;
-                        uint32  keptCount   = 0;
-
-                        for ( uint32 a = 0; a < count; a++ )
-                        {
-                            newPosition[ a ] = pending[ a ].nameStart ? keptCount : ~uint32( 0 );
-
-                            if ( pending[ a ].nameStart )
-                            {
-                                pending[ keptCount++ ] = pending[ a ];
-                            }
-                        }
-
-                        uint32 k = 0;
-
-                        for ( uint32 a = 0; a < count; a++ )
-                        {
-                            uint32 position = newPosition[ sorted[ a ].position ];
-
-                            if ( position != ~uint32( 0 ) )
-                            {
-                                sortedPositions[ k++ ] = position;
-                            }
-                        }
-
-                        count = keptCount;
-                    }
-                    else
-                    {
-                        for ( uint32 a = 0; a < count; a++ )
-                        {
-                            sortedPositions[ a ] = sorted[ a ].position;
-                        }
-                    }
-
-                    index = sortedPositions;
-
-                    return Status::kOk;
-                }
-
-                Status CopyMembers( Value& object, uint64 base, uint32 count, const uint32* index ) noexcept
-                {
-                    Member* members = nullptr;
-
-                    if ( count != 0 )
-                    {
-                        bool   indexed    = count > uint32( indexedMemberCount );
-                        uint64 memberSize = uint64( count ) * sizeof( Member );
-                        uint64 indexSize  = indexed ? RoundUpToEight( uint64( count ) * sizeof( uint32 ) ) : 0;
-
-                        members = static_cast<Member*>( document.AllocateAligned( memberSize + indexSize ) );
-                        if ( !members )
-                        {
-                            return Status::kAllocationRefused;
-                        }
-
-                        const PendingMember* pending = stack.At<PendingMember>( base );
-
-                        for ( uint32 a = 0; a < count; a++ )
-                        {
-                            members[ a ] = pending[ a ].member;
-                        }
-
-                        if ( indexed )
-                        {
-                            uint32* memberIndex = reinterpret_cast<uint32*>( members + count );
-
-                            for ( uint32 a = 0; a < count; a++ )
-                            {
-                                memberIndex[ a ] = index[ a ];
-                            }
-                        }
-                    }
-
-                    object.type         = Type::kObject;
-                    object.count        = count;
-                    object.data.members = members;
-
-                    return Status::kOk;
-                }
-            };
-
-            // Reads a text into a document.
-            class DocumentParser : public TextReader
-            {
-            public:
-                DocumentParser( StructuredData& data, const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
-                    TextReader( begin, textEnd, parseOptions, true ),
-                    document( data ),
-                    children( data )
-                {
-                }
-
-                Status ParseValue( Value& value, const char*& text, int32 depth ) noexcept
-                {
-                    uint32 c = Peek( text );
-
-                    if ( ( c == '[' ) || ( c == '{' ) )
-                    {
-                        if ( depth >= options.maxNestingDepth )
-                        {
-                            return Status::kMaximumNestingDepthExceeded;
-                        }
-                    }
-                    else if ( ( c != '"' ) && ( c != 't' ) && ( c != 'f' ) && ( c != 'n' ) && ( c != '-' ) && !IsDigit( c ) )
-                    {
-                        return Status::kExpectedJsonValue;
-                    }
-
-                    Status status = CountValue();
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    switch ( c )
-                    {
-                        case '"':
-                        {
-                            StringView string;
-
-                            status          = ParseString( string, text );
-                            value.type      = Type::kString;
-                            value.count     = string.GetLength();
-                            value.data.text = string.GetText();
-
-                            return status;
-                        }
-
-                        case 't':
-                        case 'f':
-                            value.type = Type::kBool;
-                            return ReadBool( value.data.boolean, text );
-
-                        case 'n':
-                            value.type = Type::kNull;
-                            return ReadNull( text );
-
-                        case '[':
-                            return ParseArray( value, text, depth + 1 );
-
-                        case '{':
-                            return ParseObject( value, text, depth + 1 );
-
-                        default:
-                        {
-                            const char* number = text;
-
-                            status        = ReadNumber( value.data.number, text );
-                            value.type    = Type::kNumber;
-                            value.integer = IsIntegerText( number, text );
-
-                            return status;
-                        }
-                    }
-                }
-
-            private:
-                StructuredData& document;
-                PendingValues   children;
-
-                Status ParseString( StringView& string, const char*& text ) noexcept
-                {
-                    if ( Peek( text ) != '"' )
-                    {
-                        return Status::kExpectedBeginingDoubleQuotes;
-                    }
-
-                    int32 textLength;
-                    int32 stringLength;
-
-                    Status status = ReadStringLiteral( text + 1, &textLength, &stringLength );
-                    if ( status != Status::kOk )
-                    {
-                        text += textLength + 1;
-                        return status;
-                    }
-
-                    status = CountStringBytes( stringLength );
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    text++;
-
-                    const char* bytes = "";
-
-                    if ( stringLength != 0 )
-                    {
-                        char* stored = document.AllocateBytes( uint64( stringLength ) );
-                        if ( !stored )
-                        {
-                            return Status::kAllocationRefused;
-                        }
-
-                        if ( stringLength == textLength )
-                        {
-                            CopyText( stored, text, stringLength );
-                        }
-                        else
-                        {
-                            ReadStringLiteral( text, &textLength, &stringLength, stored );
-                        }
-
-                        bytes = stored;
-                    }
-
-                    text += textLength + 1;
-                    string = StringView( bytes, uint32( stringLength ) );
-
-                    return Status::kOk;
-                }
-
-                Status ParseArray( Value& array, const char*& text, int32 depth ) noexcept
-                {
-                    uint64 base   = children.GetSize();
-                    Status status = ParseElements( text, depth );
-
-                    return ( status == Status::kOk ) ? children.CloseArray( array, base ) : status;
-                }
-
-                Status ParseElements( const char*& text, int32 depth ) noexcept
-                {
-                    bool emptyArray = true;
-
-                    for ( ;; )
-                    {
-                        text++;
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) == ']' )
-                        {
-                            if ( !emptyArray )
-                            {
-                                return Status::kExpectedJsonValue;
-                            }
-
-                            text++;
-
-                            return Status::kOk;
-                        }
-
-                        Value  element;
-                        Status status = ParseValue( element, text, depth );
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        if ( !children.Push( element ) )
-                        {
-                            return Status::kAllocationRefused;
-                        }
-
-                        emptyArray = false;
-
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) != ',' )
-                        {
-                            break;
-                        }
-                    }
-
-                    if ( Peek( text ) != ']' )
-                    {
-                        return Status::kExpectedClosingSquareBracketsOrComma;
-                    }
-
-                    text++;
-
-                    return Status::kOk;
-                }
-
-                Status ParseObject( Value& object, const char*& text, int32 depth ) noexcept
-                {
-                    uint64 base   = children.GetSize();
-                    Status status = ParseMembers( base, text, depth );
-
-                    return ( status == Status::kOk ) ? children.CloseObject( object, base, options.duplicateNames, text ) : status;
-                }
-
-                Status ParseMembers( uint64 base, const char*& text, int32 depth ) noexcept
-                {
-                    bool emptyObject = true;
-
-                    for ( ;; )
-                    {
-                        text++;
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) == '}' )
-                        {
-                            if ( !emptyObject )
-                            {
-                                return Status::kExpectedJsonValue;
-                            }
-
-                            text++;
-
-                            return Status::kOk;
-                        }
-
-                        PendingMember pending;
-                        pending.nameStart = text;
-
-                        Status status = ParseString( pending.member.name, text );
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) != ':' )
-                        {
-                            return Status::kExpectedColon;
-                        }
-
-                        text++;
-                        text = SkipWhitespace( text );
-
-                        status = ParseValue( pending.member.value, text, depth );
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        // Past the first members, SettleNames finds the duplicate names once the object ends.
-                        int32 position =
-                            ( children.GetMemberCount( base ) >= uint32( indexedMemberCount ) ) ? -1 : children.FindName( base, pending.member.name );
-
-                        if ( position < 0 )
-                        {
-                            if ( !children.Push( pending ) )
-                            {
-                                return Status::kAllocationRefused;
-                            }
-                        }
-                        else if ( options.duplicateNames == DuplicateNames::kKeepLast )
-                        {
-                            children.At<PendingMember>( base )[ position ].member.value = pending.member.value;
-                        }
-                        else if ( options.duplicateNames == DuplicateNames::kReject )
-                        {
-                            text = pending.nameStart;
-                            return Status::kDuplicateName;
-                        }
-
-                        emptyObject = false;
-
-                        text = SkipWhitespace( text );
-
-                        if ( Peek( text ) != ',' )
-                        {
-                            break;
-                        }
-                    }
-
-                    if ( Peek( text ) != '}' )
-                    {
-                        return Status::kExpectedClosingCurlyBracesOrComma;
-                    }
-
-                    text++;
-
-                    return Status::kOk;
-                }
-            };
-
-            ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
-            {
-                Clear();
-
-                if ( ( text == nullptr ) || ( length == 0 ) )
-                {
-                    return ParseResult { Status::kTextBufferContentsInvalid, 0, 0 };
-                }
-
-                if ( length > JSON4C4_MAX_FILE_SIZE )
-                {
-                    return ParseResult { Status::kFileTooLarge, 0, 0 };
-                }
-
-                uint64 firstBlockSize = RoundUpToEight( length * 2 );
-
-                nextBlockSize = ( firstBlockSize < smallestBlockSize )         ? smallestBlockSize
-                                : ( firstBlockSize > largestGrowingBlockSize ) ? largestGrowingBlockSize
-                                                                               : firstBlockSize;
-
-                ParseResult result;
-                Value*      parsedRoot = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
-
-                if ( !parsedRoot )
-                {
-                    result.status = Status::kAllocationRefused;
-                    return result;
-                }
-
-                *parsedRoot = Value();
-
-                {
-                    DocumentParser parser( *this, text, text + length, options );
-                    result.status = ParseRoot( parser, *parsedRoot, text, text + length, &result.errorLine, &result.errorColumn );
-                }
-
-                if ( result.status == Status::kOk )
-                {
-                    root = parsedRoot;
-                }
-                else
-                {
-                    Clear();
-                }
-
-                return result;
-            }
-
-            ParseResult StructuredData::Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options ) noexcept
-            {
-                int32 count = nullTerminatedTextBuffer.GetArrayElementCount();
-
-                if ( ( count >= 2 ) && ( nullTerminatedTextBuffer[ count - 1 ] != 0 ) )
-                {
-                    Clear();
-
-                    return ParseResult { Status::kUnterminatedTextBuffer, 0, 0 };
-                }
-
-                return ParseText( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
-            }
-
-            // The text of a file is read into a block from the block source, handed back when the parse ends.
-            ParseResult StructuredData::Parse( const char* fileName, const ParseOptions& options ) noexcept
-            {
-                Clear();
-
-                File       file;
-                FileStatus fileStatus = kFileOpenFailed;
-
-                MayThrow(
-                    [ & ]()
-                    {
-                        fileStatus = file.OpenFile( fileName, kFileReadOnly );
-                        return Status::kOk;
-                    } );
-
-                if ( fileStatus != kFileOkay )
-                {
-                    return ParseResult { Status::kFileOpenError, 0, 0 };
-                }
-
-                uint64 fileSize = file.GetFileSize();
-
-                if ( fileSize > JSON4C4_MAX_FILE_SIZE )
-                {
-                    return ParseResult { Status::kFileTooLarge, 0, 0 };
-                }
-
-                if ( fileSize == 0 )
-                {
-                    return ParseResult { Status::kTextBufferContentsInvalid, 0, 0 };
-                }
-
-                uint64 bufferSize = RoundUpToEight( fileSize );
-                char*  buffer     = static_cast<char*>( blockSource->AllocateBlock( bufferSize ) );
-
-                if ( !buffer )
-                {
-                    return ParseResult { Status::kAllocationRefused, 0, 0 };
-                }
-
-                ParseResult result { Status::kFileReadError, 0, 0 };
-
-                if ( file.ReadFile( buffer, fileSize ) == kFileOkay )
-                {
-                    file.CloseFile();
-                    result = ParseText( buffer, fileSize, options );
-                }
-
-                blockSource->FreeBlock( buffer, bufferSize );
-
-                return result;
-            }
-
-            // Writes what the 2.x Write writes for the same values.
-            class Writer
-            {
-            public:
-                Writer( Array<char>& outputText, uint32 indentation, char indentationCharacter ) noexcept :
-                    output( outputText ),
-                    indentationLength( indentation ),
-                    indentationChar( indentationCharacter )
-                {
-                }
-
-                Status Write( const Value& value, uint32 depth )
-                {
-                    switch ( value.GetType() )
-                    {
-                        case Type::kNull:
-                            return AppendText( output, "null" );
-
-                        case Type::kBool:
-                            return AppendText( output, *value.AsBool() ? "true" : "false" );
-
-                        case Type::kNumber:
-                            return WriteNumber( *value.AsNumber() );
-
-                        case Type::kString:
-                        {
-                            StringView string = value.AsString();
-                            return AppendEscapedString( output, string.GetText(), string.GetLength() );
-                        }
-
-                        case Type::kArray:
-                            return WriteArray( value.AsArray(), depth );
-
-                        case Type::kObject:
-                            return WriteObject( value.AsObject(), depth );
-                    }
-
-                    return Status::kInvalidValueType;
-                }
-
-            private:
-                Array<char>& output;
-                uint32       indentationLength;
-                char         indentationChar;
-
-                Status Indent( uint32 depth )
-                {
-                    uint64 length = uint64( depth ) * indentationLength;
-
-                    return ( length > JSON4C4_MAX_FILE_SIZE ) ? Status::kFileTooLarge : ExpandArray( output, indentationChar, uint32( length ) );
-                }
-
-                Status WriteNumber( double number )
-                {
-                    if ( !( number >= -maxDouble && number <= maxDouble ) )
-                    {
-                        return Status::kFloatInvalid;
-                    }
-
-                    char text[ NUMBERTEXTTHREE_F64_MAX_CHARS ];
-
-                    return AppendText( output, text, ntt_write_f64( number, text ) );
-                }
-
-                Status WriteArray( const ArrayView& array, uint32 depth )
-                {
-                    uint32 count  = array.GetElementCount();
-                    Status status = AppendText( output, "[\n" );
-
-                    for ( uint32 a = 0; ( status == Status::kOk ) && ( a != count ); a++ )
-                    {
-                        status = Indent( depth + 1 );
-
-                        if ( status == Status::kOk )
-                        {
-                            status = Write( array[ a ], depth + 1 );
-                        }
-
-                        if ( status == Status::kOk )
-                        {
-                            status = AppendText( output, ( a + 1 < count ) ? ",\n" : "\n" );
-                        }
-                    }
-
-                    if ( status == Status::kOk )
-                    {
-                        status = Indent( depth );
-                    }
-
-                    return ( status == Status::kOk ) ? AppendText( output, "]", 1 ) : status;
-                }
-
-                Status WriteObject( const ObjectView& object, uint32 depth )
-                {
-                    uint32 count  = object.GetMemberCount();
-                    Status status = AppendText( output, "{\n" );
-
-                    for ( uint32 a = 0; ( status == Status::kOk ) && ( a != count ); a++ )
-                    {
-                        const Member& member = object.begin()[ a ];
-
-                        status = Indent( depth + 1 );
-
-                        if ( status == Status::kOk )
-                        {
-                            status = AppendEscapedString( output, member.GetName().GetText(), member.GetName().GetLength() );
-                        }
-
-                        if ( status == Status::kOk )
-                        {
-                            status = AppendText( output, " : " );
-                        }
-
-                        if ( status == Status::kOk )
-                        {
-                            status = Write( member.GetValue(), depth + 1 );
-                        }
-
-                        if ( status == Status::kOk )
-                        {
-                            status = AppendText( output, ( a + 1 < count ) ? ",\n" : "\n" );
-                        }
-                    }
-
-                    if ( status == Status::kOk )
-                    {
-                        status = Indent( depth );
-                    }
-
-                    return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
-                }
-            };
-
-            Status StructuredData::Write( Array<char>& output, uint32 indentationLength, char indentationChar ) const noexcept
-            {
-                if ( !root )
-                {
-                    return Status::kInvalidStructuredData;
-                }
-
-                return MayThrow(
-                    [ & ]()
-                    {
-                        Writer writer( output, indentationLength, indentationChar );
-                        return writer.Write( *root, 0 );
-                    } );
-            }
-
-            Status StructuredData::Write( const char* fileName, uint32 indentationLength, char indentationChar ) const noexcept
-            {
-                Array<char> output;
-                Status      status = Write( output, indentationLength, indentationChar );
-
-                return ( status == Status::kOk ) ? WriteTextFile( fileName, output ) : status;
-            }
-
-            Status ValidateTraced( const Value& value, const String<>&, ReadPath& ) noexcept
-            {
-                StringView string = value.AsString();
-
-                if ( !string )
-                {
-                    return Status::kInvalidValueType;
-                }
-
-                return Detail::HoldsZero( string ) ? Status::kStringHoldsZero : Status::kOk;
-            }
-
-            Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept
-            {
-                Status status = ValidateTraced( value, data, path );
-
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                StringView string = value.AsString();
-
-                return MayThrow(
-                    [ & ]()
-                    {
-                        String<> copy( string.GetText(), int32( string.GetLength() ) );
-                        data = static_cast<String<>&&>( copy );
-
-                        return Status::kOk;
-                    } );
-            }
-
-#ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
-
-            Status ValidateTraced( const Value& value, const std::string&, ReadPath& ) noexcept
-            {
-                return value.AsString() ? Status::kOk : Status::kInvalidValueType;
-            }
-
-            Status DeserializeTraced( const Value& value, std::string& data, ReadPath& ) noexcept
-            {
-                StringView string = value.AsString();
-
-                if ( !string )
-                {
-                    return Status::kInvalidValueType;
-                }
-
-                return MayThrow(
-                    [ & ]()
-                    {
-                        std::string copy( string.GetText(), string.GetLength() );
-                        data.swap( copy );
-
-                        return Status::kOk;
-                    } );
-            }
-
-#endif
-
-            Status ReadTextFile( const char* fileName, Array<char>& text ) noexcept
-            {
-                File       file;
-                FileStatus fileStatus = kFileOpenFailed;
-
-                MayThrow(
-                    [ & ]()
-                    {
-                        fileStatus = file.OpenFile( fileName, kFileReadOnly );
-                        return Status::kOk;
-                    } );
-
-                if ( fileStatus != kFileOkay )
-                {
-                    return Status::kFileOpenError;
-                }
-
-                uint64 fileSize = file.GetFileSize();
-
-                if ( fileSize > JSON4C4_MAX_FILE_SIZE )
-                {
-                    return Status::kFileTooLarge;
-                }
-
-                Status status = MayThrow(
-                    [ & ]()
-                    {
-                        text.SetArrayElementCount( int32( fileSize ) );
-                        return Status::kOk;
-                    } );
-
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                return ( ( fileSize == 0 ) || ( file.ReadFile( text.begin(), fileSize ) == kFileOkay ) ) ? Status::kOk : Status::kFileReadError;
-            }
-
-            // Finds where the value that a read path leads to begins in a text that parsed.
-            class TextLocator : public TextReader
-            {
-            public:
-                TextLocator( const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
-                    TextReader( begin, textEnd, parseOptions, true ),
-                    textBegin( begin )
-                {
-                }
-
-                // The object that misses a member, when the path ends with one.
-                const char* Find( const ReadPath& path ) noexcept
-                {
-                    const char* text = SkipWhitespace( textBegin );
-
-                    for ( int32 a = path.GetSegmentCount() - 1; ( a >= 0 ) && text; a-- )
-                    {
-                        const ReadPath::Segment& segment = path.GetSegment( a );
-
-                        if ( segment.missing )
-                        {
-                            break;
-                        }
-
-                        text = segment.name ? FindMember( text, segment ) : FindElement( text, segment.index );
-                    }
-
-                    return text;
-                }
-
-            private:
-                const char* textBegin;
-
-                const char* SkipString( const char* text ) const noexcept
-                {
-                    int32 textLength;
-                    int32 stringLength;
-
-                    if ( ( Peek( text ) != '"' ) || ( ReadStringLiteral( text + 1, &textLength, &stringLength ) != Status::kOk ) )
-                    {
-                        return nullptr;
-                    }
-
-                    return text + textLength + 2;
-                }
-
-                const char* SkipValue( const char* text ) const noexcept
-                {
-                    switch ( Peek( text ) )
-                    {
-                        case '"':
-                            return SkipString( text );
-
-                        case '[':
-                        case '{':
-                            return SkipContainer( text );
-
-                        case 't':
-                        case 'f':
-                        {
-                            bool boolean;
-                            return ( ReadBool( boolean, text ) == Status::kOk ) ? text : nullptr;
-                        }
-
-                        case 'n':
-                            return ( ReadNull( text ) == Status::kOk ) ? text : nullptr;
-
-                        default:
-                        {
-                            double number;
-                            return ( ReadNumber( number, text ) == Status::kOk ) ? text : nullptr;
-                        }
-                    }
-                }
-
-                const char* SkipContainer( const char* text ) const noexcept
-                {
-                    uint32 close = ( text[ 0 ] == '[' ) ? ']' : '}';
-
-                    text = SkipWhitespace( text + 1 );
-
-                    while ( text && ( Peek( text ) != close ) )
-                    {
-                        if ( close == '}' )
-                        {
-                            text = SkipString( text );
-                            text = text ? SkipWhitespace( text ) : nullptr;
-                            text = ( text && ( Peek( text ) == ':' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
-                        }
-
-                        text = text ? SkipValue( text ) : nullptr;
-                        text = text ? SkipWhitespace( text ) : nullptr;
-
-                        if ( text && ( Peek( text ) == ',' ) )
-                        {
-                            text = SkipWhitespace( text + 1 );
-                        }
-                        else if ( text && ( Peek( text ) != close ) )
-                        {
-                            text = nullptr;
-                        }
-                    }
-
-                    return text ? text + 1 : nullptr;
-                }
-
-                const char* FindElement( const char* text, uint32 index ) const noexcept
-                {
-                    if ( Peek( text ) != '[' )
-                    {
-                        return nullptr;
-                    }
-
-                    text = SkipWhitespace( text + 1 );
-
-                    for ( uint32 a = 0; ( a < index ) && text; a++ )
-                    {
-                        text = SkipValue( text );
-                        text = text ? SkipWhitespace( text ) : nullptr;
-                        text = ( text && ( Peek( text ) == ',' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
-                    }
-
-                    return text;
-                }
-
-                // With kKeepLast a repeated name keeps the value of its last occurrence, otherwise of its first.
-                const char* FindMember( const char* text, const ReadPath::Segment& segment ) noexcept
-                {
-                    if ( Peek( text ) != '{' )
-                    {
-                        return nullptr;
-                    }
-
-                    const char* found = nullptr;
-
-                    text = SkipWhitespace( text + 1 );
-
-                    while ( text && ( Peek( text ) == '"' ) )
-                    {
-                        bool same = IsName( text, segment );
-
-                        text = SkipString( text );
-                        text = text ? SkipWhitespace( text ) : nullptr;
-                        text = ( text && ( Peek( text ) == ':' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
-
-                        if ( text && same )
-                        {
-                            found = text;
-
-                            if ( options.duplicateNames != DuplicateNames::kKeepLast )
-                            {
-                                break;
-                            }
-                        }
-
-                        text = text ? SkipValue( text ) : nullptr;
-                        text = text ? SkipWhitespace( text ) : nullptr;
-                        text = ( text && ( Peek( text ) == ',' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
-                    }
-
-                    return found;
-                }
-
-                bool IsName( const char* text, const ReadPath::Segment& segment ) const noexcept
-                {
-                    int32 textLength;
-                    int32 stringLength;
-
-                    if ( ( ReadStringLiteral( text + 1, &textLength, &stringLength ) != Status::kOk ) || ( uint32( stringLength ) != segment.length ) )
-                    {
-                        return false;
-                    }
-
-                    if ( stringLength == textLength )
-                    {
-                        return SameName( text + 1, uint32( stringLength ), segment.name, segment.length );
-                    }
-
-                    Array<char> name;
-                    bool        same = false;
-
-                    MayThrow(
-                        [ & ]()
-                        {
-                            name.SetArrayElementCount( stringLength );
-                            ReadStringLiteral( text + 1, &textLength, &stringLength, name.begin() );
-                            same = SameName( name.begin(), uint32( stringLength ), segment.name, segment.length );
-
-                            return Status::kOk;
-                        } );
-
-                    return same;
-                }
-            };
-
-            void LocateReadFailure( const char* text, uint64 length, const ParseOptions& options, const ReadPath& path, ReadResult& result ) noexcept
-            {
-                MayThrow(
-                    [ & ]()
-                    {
-                        String<> pathText;
-
-                        for ( int32 a = path.GetSegmentCount() - 1; a >= 0; a-- )
-                        {
-                            const ReadPath::Segment& segment = path.GetSegment( a );
-
-                            if ( !segment.name )
-                            {
-                                pathText += "[";
-                                pathText += String<>( segment.index );
-                                pathText += "]";
-
-                                continue;
-                            }
-
-                            if ( pathText.GetStringLength() != 0 )
-                            {
-                                pathText += ".";
-                            }
-
-                            for ( uint32 b = 0; b < segment.length; b++ )
-                            {
-                                char c[ 2 ] = { segment.name[ b ], 0 };
-                                pathText += ( c[ 0 ] != 0 ) ? c : "\\u0000";
-                            }
-                        }
-
-                        result.path = static_cast<String<>&&>( pathText );
-
-                        return Status::kOk;
-                    } );
-
-                TextLocator locator( text, text + length, options );
-                const char* position = locator.Find( path );
-
-                if ( position )
-                {
-                    FindLineAndColumn( text, text + length, position, &result.errorLine, &result.errorColumn );
-                }
-            }
-
-            // Whether the writer writes a number with neither a fraction nor an exponent.
-            inline bool IsIntegerNumber( double number ) noexcept
-            {
-                if ( !( ( number > -1e21 ) && ( number < 1e21 ) ) )
-                {
                     return false;
                 }
 
-                return ( number >= 9.0e18 ) || ( number <= -9.0e18 ) || ( double( int64( number ) ) == number );
-            }
-
-            // Builds a document as Serialize writes it. The elements and members of each array and object wait on the stack
-            // until the Serialize call that opened it returns, so that it is copied into the document once, at its exact
-            // count, as a parsed one is.
-            class Builder
-            {
-            public:
-                struct OpenContainer
+                if ( base )
                 {
-                    uint64 value;
-                    uint64 base;
-                };
-
-                StructuredData& document;
-                PendingValues   children;
-                ScratchStack    open;
-                Status          failure = Status::kOk;
-
-                explicit Builder( StructuredData& data ) noexcept : document( data ), children( data ), open( *data.blockSource )
-                {
+                    CopyWords( block, base, size );
+                    blockSource.FreeBlock( base, capacity );
                 }
 
-                // The first call that fails fails the build, even when the Serialize that made it goes on.
-                Status Record( Status status ) noexcept
-                {
-                    failure = ( failure == Status::kOk ) ? status : failure;
-
-                    return status;
-                }
-
-                Value& At( uint64 offset ) noexcept
-                {
-                    return *children.At<Value>( offset );
-                }
-
-                uint32 GetOpenCount() const noexcept
-                {
-                    return uint32( open.GetSize() / sizeof( OpenContainer ) );
-                }
-
-                OpenContainer* GetLastOpen() noexcept
-                {
-                    return ( open.GetSize() != 0 ) ? open.At<OpenContainer>( open.GetSize() - sizeof( OpenContainer ) ) : nullptr;
-                }
-
-                bool IsOpen( uint64 value ) noexcept
-                {
-                    const OpenContainer* containers = open.At<OpenContainer>( 0 );
-
-                    for ( uint32 a = 0; a < GetOpenCount(); a++ )
-                    {
-                        if ( containers[ a ].value == value )
-                        {
-                            return true;
-                        }
-                    }
-
-                    return false;
-                }
-
-                // Elements and members go only to the array or object opened last.
-                bool IsLastOpen( uint64 value, Type type ) noexcept
-                {
-                    const OpenContainer* last = GetLastOpen();
-
-                    return last && ( last->value == value ) && ( At( value ).type == type );
-                }
-
-                // A node that is an open array or object takes no other value.
-                Status SetScalar( uint64 value, const Value& scalar ) noexcept
-                {
-                    if ( IsOpen( value ) )
-                    {
-                        return Status::kInvalidValueType;
-                    }
-
-                    At( value ) = scalar;
-
-                    return Status::kOk;
-                }
-
-                Status SetBool( uint64 value, bool boolean ) noexcept
-                {
-                    Value scalar;
-
-                    scalar.type         = Type::kBool;
-                    scalar.data.boolean = boolean;
-
-                    return SetScalar( value, scalar );
-                }
-
-                // A number that cannot be written is refused, so that a built document can always be written.
-                Status SetNumber( uint64 value, double number ) noexcept
-                {
-                    if ( !( number >= -maxDouble && number <= maxDouble ) )
-                    {
-                        return Status::kFloatInvalid;
-                    }
-
-                    Value scalar;
-
-                    scalar.type        = Type::kNumber;
-                    scalar.integer     = IsIntegerNumber( number );
-                    scalar.data.number = number;
-
-                    return SetScalar( value, scalar );
-                }
-
-                Status SetString( uint64 value, const char* text, uint32 length ) noexcept
-                {
-                    Value  scalar;
-                    Status status = CopyText( text, length, scalar.data.text );
-
-                    scalar.type  = Type::kString;
-                    scalar.count = length;
-
-                    return ( status == Status::kOk ) ? SetScalar( value, scalar ) : status;
-                }
-
-                Status Open( uint64 value, Type type ) noexcept
-                {
-                    if ( IsOpen( value ) )
-                    {
-                        return IsLastOpen( value, type ) ? Status::kOk : Status::kInvalidValueType;
-                    }
-
-                    if ( !open.Push( OpenContainer { value, children.GetSize() } ) )
-                    {
-                        return Status::kAllocationRefused;
-                    }
-
-                    Value& container = At( value );
-                    container        = Value();
-                    container.type   = type;
-
-                    return Status::kOk;
-                }
-
-                Status AppendElement( uint64 array, uint64& element ) noexcept
-                {
-                    if ( !IsLastOpen( array, Type::kArray ) )
-                    {
-                        return Status::kInvalidValueType;
-                    }
-
-                    if ( !children.Push( Value() ) )
-                    {
-                        return Status::kAllocationRefused;
-                    }
-
-                    element = children.GetSize() - sizeof( Value );
-
-                    return Status::kOk;
-                }
-
-                Status AddMember( uint64 object, const char* name, uint32 length, uint64& member ) noexcept
-                {
-                    if ( !IsLastOpen( object, Type::kObject ) )
-                    {
-                        return Status::kInvalidValueType;
-                    }
-
-                    const char* copy;
-                    Status      status = CopyText( name, length, copy );
-
-                    if ( status != Status::kOk )
-                    {
-                        return status;
-                    }
-
-                    PendingMember pending;
-
-                    pending.member.name = StringView( copy, length );
-                    pending.nameStart   = nullptr;
-
-                    if ( !children.Push( pending ) )
-                    {
-                        return Status::kAllocationRefused;
-                    }
-
-                    uint64         pendingOffset = children.GetSize() - sizeof( PendingMember );
-                    PendingMember* pushed        = children.At<PendingMember>( pendingOffset );
-
-                    member = pendingOffset + uint64( reinterpret_cast<char*>( &pushed->member.value ) - reinterpret_cast<char*>( pushed ) );
-
-                    return Status::kOk;
-                }
-
-                Status CloseSince( uint32 openCount ) noexcept
-                {
-                    while ( GetOpenCount() > openCount )
-                    {
-                        OpenContainer container = *GetLastOpen();
-                        Value         closed;
-                        Status        status;
-
-                        open.SetSize( open.GetSize() - sizeof( OpenContainer ) );
-
-                        if ( At( container.value ).type == Type::kArray )
-                        {
-                            status = children.CloseArray( closed, container.base );
-                        }
-                        else
-                        {
-                            status = CloseObject( closed, container.base );
-                        }
-
-                        if ( status != Status::kOk )
-                        {
-                            return status;
-                        }
-
-                        At( container.value ) = closed;
-                    }
-
-                    return Status::kOk;
-                }
-
-            private:
-                Status CopyText( const char* text, uint32 length, const char*& copy ) noexcept
-                {
-                    copy = "";
-
-                    if ( length != 0 )
-                    {
-                        char* stored = document.AllocateBytes( length );
-
-                        if ( !stored )
-                        {
-                            return Status::kAllocationRefused;
-                        }
-
-                        for ( uint32 a = 0; a < length; a++ )
-                        {
-                            stored[ a ] = text[ a ];
-                        }
-
-                        copy = stored;
-                    }
-
-                    return Status::kOk;
-                }
-
-                // The parser finds a repeated name among the first members of an object as it reads them, and the builder
-                // when the object closes.
-                Status CloseObject( Value& object, uint64 base ) noexcept
-                {
-                    uint32 count = children.GetMemberCount( base );
-
-                    if ( count <= uint32( indexedMemberCount ) )
-                    {
-                        const PendingMember* pending = children.At<PendingMember>( base );
-
-                        for ( uint32 a = 1; a < count; a++ )
-                        {
-                            for ( uint32 b = 0; b < a; b++ )
-                            {
-                                if ( SameName( pending[ a ].member.name, pending[ b ].member.name ) )
-                                {
-                                    return Status::kDuplicateName;
-                                }
-                            }
-                        }
-                    }
-
-                    const char* repeated = nullptr;
-
-                    return children.CloseObject( object, base, DuplicateNames::kReject, repeated );
-                }
-            };
-
-            // A node that was never given, or that AppendElement or AddMember failed to give, has no builder.
-            Status Node::SetNull() noexcept
-            {
-                return builder ? builder->Record( builder->SetScalar( offset, Value() ) ) : Status::kInvalidValueType;
-            }
-
-            Status Node::SetBool( bool value ) noexcept
-            {
-                return builder ? builder->Record( builder->SetBool( offset, value ) ) : Status::kInvalidValueType;
-            }
-
-            Status Node::SetNumber( double value ) noexcept
-            {
-                return builder ? builder->Record( builder->SetNumber( offset, value ) ) : Status::kInvalidValueType;
-            }
-
-            Status Node::SetString( const char* text, uint32 length ) noexcept
-            {
-                return builder ? builder->Record( builder->SetString( offset, text, length ) ) : Status::kInvalidValueType;
-            }
-
-            Status Node::SetArray() noexcept
-            {
-                return builder ? builder->Record( builder->Open( offset, Type::kArray ) ) : Status::kInvalidValueType;
-            }
-
-            Status Node::SetObject() noexcept
-            {
-                return builder ? builder->Record( builder->Open( offset, Type::kObject ) ) : Status::kInvalidValueType;
-            }
-
-            Status Node::AppendElement( Node& element ) noexcept
-            {
-                uint64 at     = 0;
-                Status status = builder ? builder->Record( builder->AppendElement( offset, at ) ) : Status::kInvalidValueType;
-
-                element.builder = ( status == Status::kOk ) ? builder : nullptr;
-                element.offset  = at;
-
-                return status;
-            }
-
-            Status Node::AddMember( const char* name, uint32 length, Node& member ) noexcept
-            {
-                uint64 at     = 0;
-                Status status = builder ? builder->Record( builder->AddMember( offset, name, length, at ) ) : Status::kInvalidValueType;
-
-                member.builder = ( status == Status::kOk ) ? builder : nullptr;
-                member.offset  = at;
-
-                return status;
-            }
-
-            uint32 Node::GetOpenCount() const noexcept
-            {
-                return builder ? builder->GetOpenCount() : 0;
-            }
-
-            Status Node::CloseSince( uint32 openCount ) noexcept
-            {
-                return builder ? builder->Record( builder->CloseSince( openCount ) ) : Status::kInvalidValueType;
-            }
-
-            Status Serialize( Node node, const Value& value ) noexcept
-            {
-                switch ( value.GetType() )
-                {
-                    case Type::kNull:
-                        return node.SetNull();
-
-                    case Type::kBool:
-                        return node.SetBool( *value.AsBool() );
-
-                    case Type::kNumber:
-                        return node.SetNumber( *value.AsNumber() );
-
-                    case Type::kString:
-                        return node.SetString( value.AsString().GetText(), value.AsString().GetLength() );
-
-                    case Type::kArray:
-                    {
-                        Status status = node.SetArray();
-
-                        for ( const Value& element : value.AsArray() )
-                        {
-                            Node copy;
-
-                            status = ( status == Status::kOk ) ? node.AppendElement( copy ) : status;
-                            status = ( status == Status::kOk ) ? SerializeValue( copy, element ) : status;
-                        }
-
-                        return status;
-                    }
-
-                    case Type::kObject:
-                    {
-                        Status status = node.SetObject();
-
-                        for ( const Member& member : value.AsObject() )
-                        {
-                            Node copy;
-
-                            status = ( status == Status::kOk ) ? node.AddMember( member.GetName().GetText(), member.GetName().GetLength(), copy ) : status;
-                            status = ( status == Status::kOk ) ? SerializeValue( copy, member.GetValue() ) : status;
-                        }
-
-                        return status;
-                    }
-                }
-
-                return Status::kInvalidValueType;
-            }
-
-            // Puts the position of a member into the index of a large object, which holds the positions of count members.
-            void InsertIntoIndex( const Member* members, uint32* index, uint32 count, uint32 position ) noexcept
-            {
-                const StringView& name = members[ position ].GetName();
-                uint32            slot = FindIndexSlot( members, index, count, name.GetText(), name.GetLength() );
-
-                for ( uint32 a = count; a > slot; a-- )
-                {
-                    index[ a ] = index[ a - 1 ];
-                }
-
-                index[ slot ] = position;
-            }
-
-            // An edit is refused while a build is open, and for a value that is not of the type it needs or not in one of
-            // this document's blocks, such as a value of another document.
-            Status StructuredData::CheckEdit( const Value& target, Type type ) const noexcept
-            {
-                if ( builder || ( target.type != type ) )
-                {
-                    return Status::kInvalidValueType;
-                }
-
-                machine_address address = reinterpret_cast<machine_address>( &target );
-
-                for ( const Block* block = blocks; block; block = block->next )
-                {
-                    machine_address start = reinterpret_cast<machine_address>( block + 1 );
-                    machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
-
-                    if ( ( address >= start ) && ( address < end ) )
-                    {
-                        return Status::kOk;
-                    }
-                }
-
-                return Status::kInvalidValueType;
-            }
-
-            // The builder lives in a block of its own, handed back when the build ends.
-            Status StructuredData::BeginBuild( const Edit& edit, Node& rootNode ) noexcept
-            {
-                Status status = builder ? Status::kInvalidValueType : Status::kOk;
-
-                switch ( edit.kind )
-                {
-                    case EditKind::kDocument:
-                        break;
-
-                    case EditKind::kReplace:
-                        status = CheckEdit( *edit.target, edit.target->type );
-                        break;
-
-                    case EditKind::kAppend:
-                        status = CheckEdit( *edit.target, Type::kArray );
-                        break;
-
-                    case EditKind::kAddMember:
-                        status = CheckEdit( *edit.target, Type::kObject );
-                        status = ( ( status == Status::kOk ) && edit.target->AsObject().Find( edit.name, edit.length ) ) ? Status::kDuplicateName : status;
-                        break;
-                }
-
-                if ( status != Status::kOk )
-                {
-                    return status;
-                }
-
-                if ( edit.kind == EditKind::kDocument )
-                {
-                    Clear();
-                }
-
-                void* memory = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
-
-                if ( !memory )
-                {
-                    return Status::kAllocationRefused;
-                }
-
-                builder          = new ( memory ) Builder( *this );
-                rootNode.builder = builder;
-                rootNode.offset  = 0;
-
-                return builder->children.Push( Value() ) ? Status::kOk : Status::kAllocationRefused;
-            }
-
-            // The edit is made only when its value is built, so that a failed edit leaves the document as it was. A failed
-            // SerializeFrom leaves it empty.
-            Status StructuredData::EndBuild( const Edit& edit, const Node& rootNode, Status status ) noexcept
-            {
-                if ( !rootNode.builder )
-                {
-                    return status;
-                }
-
-                status      = ( status == Status::kOk ) ? builder->failure : status;
-                Value built = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
-
-                builder->~Builder();
-                blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
-                builder = nullptr;
-
-                status = ( status == Status::kOk ) ? Splice( edit, built ) : status;
-
-                if ( ( status != Status::kOk ) && ( edit.kind == EditKind::kDocument ) )
-                {
-                    Clear();
-                }
-
-                return status;
-            }
-
-            Status StructuredData::Splice( const Edit& edit, const Value& built ) noexcept
-            {
-                if ( edit.kind == EditKind::kDocument )
-                {
-                    Value* value = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
-
-                    if ( !value )
-                    {
-                        return Status::kAllocationRefused;
-                    }
-
-                    *value = built;
-                    root   = value;
-
-                    return Status::kOk;
-                }
-
-                Value& target = const_cast<Value&>( *edit.target );
-
-                if ( edit.kind == EditKind::kReplace )
-                {
-                    target = built;
-
-                    return Status::kOk;
-                }
-
-                const char* name = "";
-
-                if ( edit.length != 0 )
-                {
-                    char* copy = AllocateBytes( edit.length );
-
-                    if ( !copy )
-                    {
-                        return Status::kAllocationRefused;
-                    }
-
-                    for ( uint32 a = 0; a < edit.length; a++ )
-                    {
-                        copy[ a ] = edit.name[ a ];
-                    }
-
-                    name = copy;
-                }
-
-                if ( !MakeRoom( target ) )
-                {
-                    return Status::kAllocationRefused;
-                }
-
-                if ( edit.kind == EditKind::kAppend )
-                {
-                    const_cast<Value*>( target.data.elements )[ target.count++ ] = built;
-
-                    return Status::kOk;
-                }
-
-                Member* members = const_cast<Member*>( target.data.members );
-                uint32  room    = target.GetCapacity();
-
-                members[ target.count ].name  = StringView( name, edit.length );
-                members[ target.count ].value = built;
-
-                if ( room > uint32( indexedMemberCount ) )
-                {
-                    InsertIntoIndex( members, reinterpret_cast<uint32*>( members + room ), target.count, target.count );
-                }
-
-                target.count++;
-
-                return Status::kOk;
-            }
-
-            // Gives an array or object room for one more element or member. The first edit that adds to one moves it into
-            // room for a power of two of them, at least 4, which doubles when it is full. An object with room for more
-            // than 16 members keeps its index after that room, even while it has fewer members.
-            bool StructuredData::MakeRoom( Value& container ) noexcept
-            {
-                uint32 count    = container.count;
-                uint32 capacity = container.GetCapacity();
-
-                if ( ( container.capacityShift != 0 ) && ( count < capacity ) )
-                {
-                    return true;
-                }
-
-                uint8 shift = 2;
-
-                while ( ( shift < 31 ) && ( ( uint32( 1 ) << shift ) <= count ) )
-                {
-                    shift++;
-                }
-
-                uint32 room = uint32( 1 ) << shift;
-
-                if ( room <= count )
-                {
-                    return false;
-                }
-
-                bool   isObject  = container.type == Type::kObject;
-                uint64 itemSize  = isObject ? sizeof( Member ) : sizeof( Value );
-                bool   indexed   = isObject && ( room > uint32( indexedMemberCount ) );
-                uint64 indexSize = indexed ? uint64( room ) * sizeof( uint32 ) : 0;
-                char*  storage   = static_cast<char*>( AllocateAligned( uint64( room ) * itemSize + indexSize ) );
-
-                if ( !storage )
-                {
-                    return false;
-                }
-
-                if ( count != 0 )
-                {
-                    CopyWords( storage, isObject ? static_cast<const void*>( container.data.members ) : container.data.elements, uint64( count ) * itemSize );
-                }
-
-                if ( indexed )
-                {
-                    const Member* members = reinterpret_cast<const Member*>( storage );
-                    uint32*       index   = reinterpret_cast<uint32*>( storage + uint64( room ) * itemSize );
-
-                    if ( capacity > uint32( indexedMemberCount ) )
-                    {
-                        const uint32* oldIndex = reinterpret_cast<const uint32*>( container.data.members + capacity );
-
-                        for ( uint32 a = 0; a < count; a++ )
-                        {
-                            index[ a ] = oldIndex[ a ];
-                        }
-                    }
-                    else
-                    {
-                        for ( uint32 a = 0; a < count; a++ )
-                        {
-                            InsertIntoIndex( members, index, a, a );
-                        }
-                    }
-                }
-
-                if ( isObject )
-                {
-                    container.data.members = reinterpret_cast<const Member*>( storage );
-                }
-                else
-                {
-                    container.data.elements = reinterpret_cast<const Value*>( storage );
-                }
-
-                container.capacityShift = shift;
+                base     = block;
+                capacity = grown;
 
                 return true;
             }
 
-            Status StructuredData::RemoveElement( const Value& array, uint32 index ) noexcept
+            template <class T>
+            bool Push( const T& item ) noexcept
             {
-                Status status = CheckEdit( array, Type::kArray );
-
-                if ( status != Status::kOk )
+                if ( !Reserve( sizeof( T ) ) )
                 {
-                    return status;
+                    return false;
                 }
 
-                if ( index >= array.count )
+                *reinterpret_cast<T*>( base + size ) = item;
+                size += sizeof( T );
+
+                return true;
+            }
+
+        private:
+            BlockSource& blockSource;
+            char*        base     = nullptr;
+            uint64       capacity = 0;
+            uint64       size     = 0;
+        };
+
+        struct PendingMember
+        {
+            Member      member;
+            const char* nameStart;
+        };
+
+        // The elements and members of the arrays and objects being parsed or built. Each array and object collects them
+        // on a stack in blocks from the document's block source and copies them into the document once, at their exact
+        // count, when it closes.
+        class PendingValues
+        {
+        public:
+            explicit PendingValues( StructuredData& data ) noexcept : document( data ), stack( *data.blockSource )
+            {
+            }
+
+            uint64 GetSize() const noexcept
+            {
+                return stack.GetSize();
+            }
+
+            uint32 GetMemberCount( uint64 base ) const noexcept
+            {
+                return uint32( ( stack.GetSize() - base ) / sizeof( PendingMember ) );
+            }
+
+            template <class T>
+            T* At( uint64 offset ) noexcept
+            {
+                return stack.At<T>( offset );
+            }
+
+            template <class T>
+            bool Push( const T& item ) noexcept
+            {
+                return stack.Push( item );
+            }
+
+            int32 FindName( uint64 base, const StringView& name ) noexcept
+            {
+                const PendingMember* pending = stack.At<PendingMember>( base );
+                uint32               count   = GetMemberCount( base );
+
+                for ( uint32 a = 0; a < count; a++ )
                 {
-                    return Status::kIndexOutOfRange;
+                    if ( SameName( pending[ a ].member.name, name ) )
+                    {
+                        return int32( a );
+                    }
                 }
 
-                Value& edited   = const_cast<Value&>( array );
-                Value* elements = const_cast<Value*>( edited.data.elements );
+                return -1;
+            }
 
-                for ( uint32 a = index + 1; a < edited.count; a++ )
+            Status CloseArray( Value& array, uint64 base ) noexcept
+            {
+                uint32 count    = uint32( ( stack.GetSize() - base ) / sizeof( Value ) );
+                Value* elements = nullptr;
+
+                if ( count != 0 )
                 {
-                    elements[ a - 1 ] = elements[ a ];
+                    elements = static_cast<Value*>( document.AllocateAligned( uint64( count ) * sizeof( Value ) ) );
+
+                    if ( !elements )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    CopyWords( elements, stack.At<Value>( base ), uint64( count ) * sizeof( Value ) );
                 }
 
-                edited.count--;
+                array.type          = Type::kArray;
+                array.count         = count;
+                array.data.elements = elements;
+
+                stack.SetSize( base );
 
                 return Status::kOk;
             }
 
-            // The members after the one removed move down, so that the others keep their order. An object without room to
-            // spare keeps its index right after its members, so the index moves down with them.
-            Status StructuredData::RemoveMember( const Value& object, const char* name, uint32 length ) noexcept
+            // With kReject a repeated name fails, and repeated is set to where the name of the earliest repeat begins.
+            Status CloseObject( Value& object, uint64 base, DuplicateNames duplicateNames, const char*& repeated ) noexcept
             {
-                Status status = CheckEdit( object, Type::kObject );
+                uint32        count  = GetMemberCount( base );
+                const uint32* index  = nullptr;
+                Status        status = Status::kOk;
 
-                if ( status != Status::kOk )
+                if ( count > uint32( indexedMemberCount ) )
                 {
-                    return status;
+                    status = SettleNames( base, count, index, duplicateNames, repeated );
                 }
 
-                if ( !name )
+                if ( status == Status::kOk )
                 {
-                    return Status::kNameNotPresent;
+                    status = CopyMembers( object, base, count, index );
                 }
 
-                Value&  edited   = const_cast<Value&>( object );
-                Member* members  = const_cast<Member*>( edited.data.members );
-                uint32  count    = edited.count;
-                uint32  capacity = edited.GetCapacity();
-                uint32* index    = ( capacity > uint32( indexedMemberCount ) ) ? reinterpret_cast<uint32*>( members + capacity ) : nullptr;
-                uint32  slot     = 0;
-                uint32  position = 0;
+                stack.SetSize( base );
 
-                if ( index )
+                return status;
+            }
+
+        private:
+            struct NamedPosition
+            {
+                const char* name;
+                uint32      length;
+                uint32      position;
+            };
+
+            StructuredData& document;
+            ScratchStack    stack;
+
+            // A merge sort, so that members with the same name stay in document order. Returns the array that holds
+            // the sorted names.
+            static NamedPosition* SortByName( NamedPosition* names, NamedPosition* scratch, uint32 count ) noexcept
+            {
+                NamedPosition* from = names;
+                NamedPosition* to   = scratch;
+
+                for ( uint32 width = 1; width < count; width *= 2 )
                 {
-                    slot     = FindIndexSlot( members, index, count, name, length );
-                    position = ( slot < count ) ? index[ slot ] : count;
-                }
-                else
-                {
-                    while ( ( position < count ) && !SameName( members[ position ].name.GetText(), members[ position ].name.GetLength(), name, length ) )
+                    for ( uint32 left = 0; left < count; left += 2 * width )
                     {
-                        position++;
+                        uint32 middle = ( count - left > width ) ? left + width : count;
+                        uint32 right  = ( count - middle > width ) ? middle + width : count;
+                        uint32 i      = left;
+                        uint32 j      = middle;
+
+                        for ( uint32 k = left; k < right; k++ )
+                        {
+                            bool takeLeft = ( j == right ) ||
+                                            ( ( i < middle ) && ( CompareNames( from[ i ].name, from[ i ].length, from[ j ].name, from[ j ].length ) <= 0 ) );
+                            to[ k ] = takeLeft ? from[ i++ ] : from[ j++ ];
+                        }
                     }
+
+                    NamedPosition* swap = from;
+                    from                = to;
+                    to                  = swap;
                 }
 
-                if ( ( position == count ) || !SameName( members[ position ].name.GetText(), members[ position ].name.GetLength(), name, length ) )
+                return from;
+            }
+
+            // Sorts the members of a large object by name and settles the duplicate names among them. With kReject, the
+            // duplicate reported is the earliest member whose name came before, as if each member were checked when
+            // read. The positions of the members in name order are left in index.
+            Status SettleNames( uint64 base, uint32& count, const uint32*& index, DuplicateNames duplicateNames, const char*& repeated ) noexcept
+            {
+                uint64 namesOffset = base + uint64( count ) * sizeof( PendingMember );
+
+                if ( !stack.Reserve( uint64( count ) * 2 * sizeof( NamedPosition ) ) )
                 {
-                    return Status::kNameNotPresent;
+                    return Status::kAllocationRefused;
                 }
 
-                for ( uint32 a = position + 1; a < count; a++ )
+                PendingMember* pending = stack.At<PendingMember>( base );
+                NamedPosition* names   = stack.At<NamedPosition>( namesOffset );
+                NamedPosition* scratch = names + count;
+
+                for ( uint32 a = 0; a < count; a++ )
                 {
-                    members[ a - 1 ] = members[ a ];
+                    names[ a ] = NamedPosition { pending[ a ].member.name.GetText(), pending[ a ].member.name.GetLength(), a };
                 }
 
-                uint32 room = ( edited.capacityShift != 0 ) ? capacity : count - 1;
+                const NamedPosition* sorted    = SortByName( names, scratch, count );
+                uint32*              positions = reinterpret_cast<uint32*>( ( sorted == names ) ? scratch : names );
+                uint32               repeat    = count;
+                bool                 removed   = false;
 
-                if ( room > uint32( indexedMemberCount ) )
+                for ( uint32 first = 0, next = 1; first < count; first = next++ )
                 {
-                    uint32* movedIndex = reinterpret_cast<uint32*>( members + room );
-                    uint32  kept       = 0;
+                    while ( ( next < count ) && SameName( sorted[ next ].name, sorted[ next ].length, sorted[ first ].name, sorted[ first ].length ) )
+                    {
+                        next++;
+                    }
+
+                    if ( next - first == 1 )
+                    {
+                        continue;
+                    }
+
+                    if ( duplicateNames == DuplicateNames::kReject )
+                    {
+                        repeat = ( sorted[ first + 1 ].position < repeat ) ? sorted[ first + 1 ].position : repeat;
+                        continue;
+                    }
+
+                    uint32 kept = sorted[ ( duplicateNames == DuplicateNames::kKeepLast ) ? next - 1 : first ].position;
+
+                    pending[ sorted[ first ].position ].member.value = pending[ kept ].member.value;
+
+                    for ( uint32 a = first + 1; a < next; a++ )
+                    {
+                        pending[ sorted[ a ].position ].nameStart = nullptr;
+                    }
+
+                    removed = true;
+                }
+
+                if ( repeat < count )
+                {
+                    repeated = pending[ repeat ].nameStart;
+                    return Status::kDuplicateName;
+                }
+
+                uint32* sortedPositions = positions + count;
+
+                if ( removed )
+                {
+                    uint32* newPosition = positions;
+                    uint32  keptCount   = 0;
 
                     for ( uint32 a = 0; a < count; a++ )
                     {
-                        if ( a != slot )
+                        newPosition[ a ] = pending[ a ].nameStart ? keptCount : ~uint32( 0 );
+
+                        if ( pending[ a ].nameStart )
                         {
-                            movedIndex[ kept++ ] = index[ a ] - uint32( index[ a ] > position );
+                            pending[ keptCount++ ] = pending[ a ];
+                        }
+                    }
+
+                    uint32 k = 0;
+
+                    for ( uint32 a = 0; a < count; a++ )
+                    {
+                        uint32 position = newPosition[ sorted[ a ].position ];
+
+                        if ( position != ~uint32( 0 ) )
+                        {
+                            sortedPositions[ k++ ] = position;
+                        }
+                    }
+
+                    count = keptCount;
+                }
+                else
+                {
+                    for ( uint32 a = 0; a < count; a++ )
+                    {
+                        sortedPositions[ a ] = sorted[ a ].position;
+                    }
+                }
+
+                index = sortedPositions;
+
+                return Status::kOk;
+            }
+
+            Status CopyMembers( Value& object, uint64 base, uint32 count, const uint32* index ) noexcept
+            {
+                Member* members = nullptr;
+
+                if ( count != 0 )
+                {
+                    bool   indexed    = count > uint32( indexedMemberCount );
+                    uint64 memberSize = uint64( count ) * sizeof( Member );
+                    uint64 indexSize  = indexed ? RoundUpToEight( uint64( count ) * sizeof( uint32 ) ) : 0;
+
+                    members = static_cast<Member*>( document.AllocateAligned( memberSize + indexSize ) );
+                    if ( !members )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    const PendingMember* pending = stack.At<PendingMember>( base );
+
+                    for ( uint32 a = 0; a < count; a++ )
+                    {
+                        members[ a ] = pending[ a ].member;
+                    }
+
+                    if ( indexed )
+                    {
+                        uint32* memberIndex = reinterpret_cast<uint32*>( members + count );
+
+                        for ( uint32 a = 0; a < count; a++ )
+                        {
+                            memberIndex[ a ] = index[ a ];
                         }
                     }
                 }
 
-                edited.count = count - 1;
+                object.type         = Type::kObject;
+                object.count        = count;
+                object.data.members = members;
 
                 return Status::kOk;
             }
-        } // namespace V3
+        };
 
-    } // namespace Json
-} // namespace C4
+        // Reads a text into a document.
+        class DocumentParser : public TextReader
+        {
+        public:
+            DocumentParser( StructuredData& data, const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
+                TextReader( begin, textEnd, parseOptions, true ),
+                document( data ),
+                children( data )
+            {
+            }
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, Terathon::String<>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const Terathon::String<>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const Terathon::String<>& data ) noexcept;
+            Status ParseValue( Value& value, const char*& text, int32 depth ) noexcept
+            {
+                uint32 c = Peek( text );
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, double& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const double& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const double& data ) noexcept;
+                if ( ( c == '[' ) || ( c == '{' ) )
+                {
+                    if ( depth >= options.maxNestingDepth )
+                    {
+                        return Status::kMaximumNestingDepthExceeded;
+                    }
+                }
+                else if ( ( c != '"' ) && ( c != 't' ) && ( c != 'f' ) && ( c != 'n' ) && ( c != '-' ) && !IsDigit( c ) )
+                {
+                    return Status::kExpectedJsonValue;
+                }
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, bool& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const bool& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const bool& data ) noexcept;
+                Status status = CountValue();
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, C4::Json::Null& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const C4::Json::Null& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const C4::Json::Null& data ) noexcept;
+                switch ( c )
+                {
+                    case '"':
+                    {
+                        StringView string;
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, Terathon::Array<Terathon::String<>>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const Terathon::Array<Terathon::String<>>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const Terathon::Array<Terathon::String<>>& data ) noexcept;
+                        status          = ParseString( string, text );
+                        value.type      = Type::kString;
+                        value.count     = string.GetLength();
+                        value.data.text = string.GetText();
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, Terathon::Array<double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const Terathon::Array<double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const Terathon::Array<double>& data ) noexcept;
+                        return status;
+                    }
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, Terathon::Array<bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const Terathon::Array<bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const Terathon::Array<bool>& data ) noexcept;
+                    case 't':
+                    case 'f':
+                        value.type = Type::kBool;
+                        return ReadBool( value.data.boolean, text );
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, Terathon::Array<C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const Terathon::Array<C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const Terathon::Array<C4::Json::Null>& data ) noexcept;
+                    case 'n':
+                        value.type = Type::kNull;
+                        return ReadNull( text );
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, C4::Json::ObjectMap<Terathon::String<>>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const C4::Json::ObjectMap<Terathon::String<>>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const C4::Json::ObjectMap<Terathon::String<>>& data ) noexcept;
+                    case '[':
+                        return ParseArray( value, text, depth + 1 );
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, C4::Json::ObjectMap<double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const C4::Json::ObjectMap<double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const C4::Json::ObjectMap<double>& data ) noexcept;
+                    case '{':
+                        return ParseObject( value, text, depth + 1 );
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, C4::Json::ObjectMap<bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const C4::Json::ObjectMap<bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const C4::Json::ObjectMap<bool>& data ) noexcept;
+                    default:
+                    {
+                        const char* number = text;
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, C4::Json::ObjectMap<C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const C4::Json::ObjectMap<C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const C4::Json::ObjectMap<C4::Json::Null>& data ) noexcept;
+                        status        = ReadNumber( value.data.number, text );
+                        value.type    = Type::kNumber;
+                        value.integer = IsIntegerText( number, text );
+
+                        return status;
+                    }
+                }
+            }
+
+        private:
+            StructuredData& document;
+            PendingValues   children;
+
+            Status ParseString( StringView& string, const char*& text ) noexcept
+            {
+                if ( Peek( text ) != '"' )
+                {
+                    return Status::kExpectedBeginningDoubleQuotes;
+                }
+
+                int32 textLength;
+                int32 stringLength;
+
+                Status status = ReadStringLiteral( text + 1, &textLength, &stringLength );
+                if ( status != Status::kOk )
+                {
+                    text += textLength + 1;
+                    return status;
+                }
+
+                status = CountStringBytes( stringLength );
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                text++;
+
+                const char* bytes = "";
+
+                if ( stringLength != 0 )
+                {
+                    char* stored = document.AllocateBytes( uint64( stringLength ) );
+                    if ( !stored )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    if ( stringLength == textLength )
+                    {
+                        CopyText( stored, text, stringLength );
+                    }
+                    else
+                    {
+                        ReadStringLiteral( text, &textLength, &stringLength, stored );
+                    }
+
+                    bytes = stored;
+                }
+
+                text += textLength + 1;
+                string = StringView( bytes, uint32( stringLength ) );
+
+                return Status::kOk;
+            }
+
+            Status ParseArray( Value& array, const char*& text, int32 depth ) noexcept
+            {
+                uint64 base   = children.GetSize();
+                Status status = ParseElements( text, depth );
+
+                return ( status == Status::kOk ) ? children.CloseArray( array, base ) : status;
+            }
+
+            Status ParseElements( const char*& text, int32 depth ) noexcept
+            {
+                bool emptyArray = true;
+
+                for ( ;; )
+                {
+                    text++;
+                    text = SkipWhitespace( text );
+
+                    if ( Peek( text ) == ']' )
+                    {
+                        if ( !emptyArray )
+                        {
+                            return Status::kExpectedJsonValue;
+                        }
+
+                        text++;
+
+                        return Status::kOk;
+                    }
+
+                    Value  element;
+                    Status status = ParseValue( element, text, depth );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    if ( !children.Push( element ) )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    emptyArray = false;
+
+                    text = SkipWhitespace( text );
+
+                    if ( Peek( text ) != ',' )
+                    {
+                        break;
+                    }
+                }
+
+                if ( Peek( text ) != ']' )
+                {
+                    return Status::kExpectedClosingSquareBracketsOrComma;
+                }
+
+                text++;
+
+                return Status::kOk;
+            }
+
+            Status ParseObject( Value& object, const char*& text, int32 depth ) noexcept
+            {
+                uint64 base   = children.GetSize();
+                Status status = ParseMembers( base, text, depth );
+
+                return ( status == Status::kOk ) ? children.CloseObject( object, base, options.duplicateNames, text ) : status;
+            }
+
+            Status ParseMembers( uint64 base, const char*& text, int32 depth ) noexcept
+            {
+                bool emptyObject = true;
+
+                for ( ;; )
+                {
+                    text++;
+                    text = SkipWhitespace( text );
+
+                    if ( Peek( text ) == '}' )
+                    {
+                        if ( !emptyObject )
+                        {
+                            return Status::kExpectedJsonValue;
+                        }
+
+                        text++;
+
+                        return Status::kOk;
+                    }
+
+                    PendingMember pending;
+                    pending.nameStart = text;
+
+                    Status status = ParseString( pending.member.name, text );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    text = SkipWhitespace( text );
+
+                    if ( Peek( text ) != ':' )
+                    {
+                        return Status::kExpectedColon;
+                    }
+
+                    text++;
+                    text = SkipWhitespace( text );
+
+                    status = ParseValue( pending.member.value, text, depth );
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    // Past the first members, SettleNames finds the duplicate names once the object ends.
+                    int32 position = ( children.GetMemberCount( base ) >= uint32( indexedMemberCount ) ) ? -1 : children.FindName( base, pending.member.name );
+
+                    if ( position < 0 )
+                    {
+                        if ( !children.Push( pending ) )
+                        {
+                            return Status::kAllocationRefused;
+                        }
+                    }
+                    else if ( options.duplicateNames == DuplicateNames::kKeepLast )
+                    {
+                        children.At<PendingMember>( base )[ position ].member.value = pending.member.value;
+                    }
+                    else if ( options.duplicateNames == DuplicateNames::kReject )
+                    {
+                        text = pending.nameStart;
+                        return Status::kDuplicateName;
+                    }
+
+                    emptyObject = false;
+
+                    text = SkipWhitespace( text );
+
+                    if ( Peek( text ) != ',' )
+                    {
+                        break;
+                    }
+                }
+
+                if ( Peek( text ) != '}' )
+                {
+                    return Status::kExpectedClosingCurlyBracesOrComma;
+                }
+
+                text++;
+
+                return Status::kOk;
+            }
+        };
+
+        ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
+        {
+            Clear();
+
+            if ( ( text == nullptr ) || ( length == 0 ) )
+            {
+                return ParseResult { Status::kTextBufferContentsInvalid, 0, 0 };
+            }
+
+            if ( length > JSON4C4_MAX_FILE_SIZE )
+            {
+                return ParseResult { Status::kFileTooLarge, 0, 0 };
+            }
+
+            uint64 firstBlockSize = RoundUpToEight( length * 2 );
+
+            nextBlockSize = ( firstBlockSize < smallestBlockSize )         ? smallestBlockSize
+                            : ( firstBlockSize > largestGrowingBlockSize ) ? largestGrowingBlockSize
+                                                                           : firstBlockSize;
+
+            ParseResult result;
+            Value*      parsedRoot = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
+
+            if ( !parsedRoot )
+            {
+                result.status = Status::kAllocationRefused;
+                return result;
+            }
+
+            *parsedRoot = Value();
+
+            {
+                DocumentParser parser( *this, text, text + length, options );
+                result.status = ParseRoot( parser, *parsedRoot, text, text + length, &result.errorLine, &result.errorColumn );
+            }
+
+            if ( result.status == Status::kOk )
+            {
+                root = parsedRoot;
+            }
+            else
+            {
+                Clear();
+            }
+
+            return result;
+        }
+
+        ParseResult StructuredData::Parse( const Array<char>& nullTerminatedTextBuffer, const ParseOptions& options ) noexcept
+        {
+            int32 count = nullTerminatedTextBuffer.GetArrayElementCount();
+
+            if ( ( count >= 2 ) && ( nullTerminatedTextBuffer[ count - 1 ] != 0 ) )
+            {
+                Clear();
+
+                return ParseResult { Status::kUnterminatedTextBuffer, 0, 0 };
+            }
+
+            return ParseText( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
+        }
+
+        // The text of a file is read into a block from the block source, handed back when the parse ends.
+        ParseResult StructuredData::Parse( const char* fileName, const ParseOptions& options ) noexcept
+        {
+            Clear();
+
+            File       file;
+            FileStatus fileStatus = kFileOpenFailed;
+
+            Detail::MayThrow(
+                [ & ]()
+                {
+                    fileStatus = file.OpenFile( fileName, kFileReadOnly );
+                    return Status::kOk;
+                } );
+
+            if ( fileStatus != kFileOkay )
+            {
+                return ParseResult { Status::kFileOpenError, 0, 0 };
+            }
+
+            uint64 fileSize = file.GetFileSize();
+
+            if ( fileSize > JSON4C4_MAX_FILE_SIZE )
+            {
+                return ParseResult { Status::kFileTooLarge, 0, 0 };
+            }
+
+            if ( fileSize == 0 )
+            {
+                return ParseResult { Status::kTextBufferContentsInvalid, 0, 0 };
+            }
+
+            uint64 bufferSize = RoundUpToEight( fileSize );
+            char*  buffer     = static_cast<char*>( blockSource->AllocateBlock( bufferSize ) );
+
+            if ( !buffer )
+            {
+                return ParseResult { Status::kAllocationRefused, 0, 0 };
+            }
+
+            ParseResult result { Status::kFileReadError, 0, 0 };
+
+            if ( file.ReadFile( buffer, fileSize ) == kFileOkay )
+            {
+                file.CloseFile();
+                result = ParseText( buffer, fileSize, options );
+            }
+
+            blockSource->FreeBlock( buffer, bufferSize );
+
+            return result;
+        }
+
+        // Writes what the 2.x Write writes for the same values.
+        class Writer
+        {
+        public:
+            Writer( Array<char>& outputText, uint32 indentation, char indentationCharacter ) noexcept :
+                output( outputText ),
+                indentationLength( indentation ),
+                indentationChar( indentationCharacter )
+            {
+            }
+
+            Status Write( const Value& value, uint32 depth )
+            {
+                switch ( value.GetType() )
+                {
+                    case Type::kNull:
+                        return AppendText( output, "null" );
+
+                    case Type::kBool:
+                        return AppendText( output, *value.AsBool() ? "true" : "false" );
+
+                    case Type::kNumber:
+                        return WriteNumber( *value.AsNumber() );
+
+                    case Type::kString:
+                    {
+                        StringView string = value.AsString();
+                        return AppendEscapedString( output, string.GetText(), string.GetLength() );
+                    }
+
+                    case Type::kArray:
+                        return WriteArray( value.AsArray(), depth );
+
+                    case Type::kObject:
+                        return WriteObject( value.AsObject(), depth );
+                }
+
+                return Status::kInvalidValueType;
+            }
+
+        private:
+            Array<char>& output;
+            uint32       indentationLength;
+            char         indentationChar;
+
+            Status Indent( uint32 depth )
+            {
+                uint64 length = uint64( depth ) * indentationLength;
+
+                return ( length > JSON4C4_MAX_FILE_SIZE ) ? Status::kFileTooLarge : ExpandArray( output, indentationChar, uint32( length ) );
+            }
+
+            Status WriteNumber( double number )
+            {
+                if ( !( number >= -maxDouble && number <= maxDouble ) )
+                {
+                    return Status::kFloatInvalid;
+                }
+
+                char text[ NUMBERTEXTTHREE_F64_MAX_CHARS ];
+
+                return AppendText( output, text, ntt_write_f64( number, text ) );
+            }
+
+            Status WriteArray( const ArrayView& array, uint32 depth )
+            {
+                uint32 count  = array.GetElementCount();
+                Status status = AppendText( output, "[\n" );
+
+                for ( uint32 a = 0; ( status == Status::kOk ) && ( a != count ); a++ )
+                {
+                    status = Indent( depth + 1 );
+
+                    if ( status == Status::kOk )
+                    {
+                        status = Write( array[ a ], depth + 1 );
+                    }
+
+                    if ( status == Status::kOk )
+                    {
+                        status = AppendText( output, ( a + 1 < count ) ? ",\n" : "\n" );
+                    }
+                }
+
+                if ( status == Status::kOk )
+                {
+                    status = Indent( depth );
+                }
+
+                return ( status == Status::kOk ) ? AppendText( output, "]", 1 ) : status;
+            }
+
+            Status WriteObject( const ObjectView& object, uint32 depth )
+            {
+                uint32 count  = object.GetMemberCount();
+                Status status = AppendText( output, "{\n" );
+
+                for ( uint32 a = 0; ( status == Status::kOk ) && ( a != count ); a++ )
+                {
+                    const Member& member = object.begin()[ a ];
+
+                    status = Indent( depth + 1 );
+
+                    if ( status == Status::kOk )
+                    {
+                        status = AppendEscapedString( output, member.GetName().GetText(), member.GetName().GetLength() );
+                    }
+
+                    if ( status == Status::kOk )
+                    {
+                        status = AppendText( output, " : " );
+                    }
+
+                    if ( status == Status::kOk )
+                    {
+                        status = Write( member.GetValue(), depth + 1 );
+                    }
+
+                    if ( status == Status::kOk )
+                    {
+                        status = AppendText( output, ( a + 1 < count ) ? ",\n" : "\n" );
+                    }
+                }
+
+                if ( status == Status::kOk )
+                {
+                    status = Indent( depth );
+                }
+
+                return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
+            }
+        };
+
+        Status StructuredData::Write( Array<char>& output, uint32 indentationLength, char indentationChar ) const noexcept
+        {
+            if ( !root )
+            {
+                return Status::kInvalidStructuredData;
+            }
+
+            return Detail::MayThrow(
+                [ & ]()
+                {
+                    Writer writer( output, indentationLength, indentationChar );
+                    return writer.Write( *root, 0 );
+                } );
+        }
+
+        Status StructuredData::Write( const char* fileName, uint32 indentationLength, char indentationChar ) const noexcept
+        {
+            Array<char> output;
+            Status      status = Write( output, indentationLength, indentationChar );
+
+            return ( status == Status::kOk ) ? WriteTextFile( fileName, output ) : status;
+        }
+
+        Status ValidateTraced( const Value& value, const String<>&, ReadPath& ) noexcept
+        {
+            StringView string = value.AsString();
+
+            if ( !string )
+            {
+                return Status::kInvalidValueType;
+            }
+
+            return Detail::HoldsZero( string ) ? Status::kStringHoldsZero : Status::kOk;
+        }
+
+        Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept
+        {
+            Status status = ValidateTraced( value, data, path );
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            StringView string = value.AsString();
+
+            return Detail::MayThrow(
+                [ & ]()
+                {
+                    String<> copy( string.GetText(), int32( string.GetLength() ) );
+                    data = static_cast<String<>&&>( copy );
+
+                    return Status::kOk;
+                } );
+        }
 
 #ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::vector<std::string>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::vector<std::string>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::vector<std::string>& data ) noexcept;
+        Status ValidateTraced( const Value& value, const std::string&, ReadPath& ) noexcept
+        {
+            return value.AsString() ? Status::kOk : Status::kInvalidValueType;
+        }
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::vector<double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::vector<double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::vector<double>& data ) noexcept;
+        Status DeserializeTraced( const Value& value, std::string& data, ReadPath& ) noexcept
+        {
+            StringView string = value.AsString();
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::vector<bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::vector<bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::vector<bool>& data ) noexcept;
+            if ( !string )
+            {
+                return Status::kInvalidValueType;
+            }
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::vector<C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::vector<C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::vector<C4::Json::Null>& data ) noexcept;
+            return Detail::MayThrow(
+                [ & ]()
+                {
+                    std::string copy( string.GetText(), string.GetLength() );
+                    data.swap( copy );
 
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::map<std::string, std::string>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::map<std::string, std::string>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::map<std::string, std::string>& data ) noexcept;
-
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::map<std::string, double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::map<std::string, double>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::map<std::string, double>& data ) noexcept;
-
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::map<std::string, bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::map<std::string, bool>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::map<std::string, bool>& data ) noexcept;
-
-template TERATHON_API C4::Json::Status C4::Json::Deserialize( const C4::Json::Value* value, std::map<std::string, C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Validate( const C4::Json::Value* value, const std::map<std::string, C4::Json::Null>& data ) noexcept;
-template TERATHON_API C4::Json::Status C4::Json::Serialize( C4::Json::Value* value, const std::map<std::string, C4::Json::Null>& data ) noexcept;
+                    return Status::kOk;
+                } );
+        }
 
 #endif
+
+        Status ReadTextFile( const char* fileName, Array<char>& text ) noexcept
+        {
+            File       file;
+            FileStatus fileStatus = kFileOpenFailed;
+
+            Detail::MayThrow(
+                [ & ]()
+                {
+                    fileStatus = file.OpenFile( fileName, kFileReadOnly );
+                    return Status::kOk;
+                } );
+
+            if ( fileStatus != kFileOkay )
+            {
+                return Status::kFileOpenError;
+            }
+
+            uint64 fileSize = file.GetFileSize();
+
+            if ( fileSize > JSON4C4_MAX_FILE_SIZE )
+            {
+                return Status::kFileTooLarge;
+            }
+
+            Status status = Detail::MayThrow(
+                [ & ]()
+                {
+                    text.SetArrayElementCount( int32( fileSize ) );
+                    return Status::kOk;
+                } );
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            return ( ( fileSize == 0 ) || ( file.ReadFile( text.begin(), fileSize ) == kFileOkay ) ) ? Status::kOk : Status::kFileReadError;
+        }
+
+        // Finds where the value that a read path leads to begins in a text that parsed.
+        class TextLocator : public TextReader
+        {
+        public:
+            TextLocator( const char* begin, const char* textEnd, const ParseOptions& parseOptions ) noexcept :
+                TextReader( begin, textEnd, parseOptions, true ),
+                textBegin( begin )
+            {
+            }
+
+            // The object that misses a member, when the path ends with one.
+            const char* Find( const ReadPath& path ) noexcept
+            {
+                const char* text = SkipWhitespace( textBegin );
+
+                for ( int32 a = path.GetSegmentCount() - 1; ( a >= 0 ) && text; a-- )
+                {
+                    const ReadPath::Segment& segment = path.GetSegment( a );
+
+                    if ( segment.missing )
+                    {
+                        break;
+                    }
+
+                    text = segment.name ? FindMember( text, segment ) : FindElement( text, segment.index );
+                }
+
+                return text;
+            }
+
+        private:
+            const char* textBegin;
+
+            const char* SkipString( const char* text ) const noexcept
+            {
+                int32 textLength;
+                int32 stringLength;
+
+                if ( ( Peek( text ) != '"' ) || ( ReadStringLiteral( text + 1, &textLength, &stringLength ) != Status::kOk ) )
+                {
+                    return nullptr;
+                }
+
+                return text + textLength + 2;
+            }
+
+            const char* SkipValue( const char* text ) const noexcept
+            {
+                switch ( Peek( text ) )
+                {
+                    case '"':
+                        return SkipString( text );
+
+                    case '[':
+                    case '{':
+                        return SkipContainer( text );
+
+                    case 't':
+                    case 'f':
+                    {
+                        bool boolean;
+                        return ( ReadBool( boolean, text ) == Status::kOk ) ? text : nullptr;
+                    }
+
+                    case 'n':
+                        return ( ReadNull( text ) == Status::kOk ) ? text : nullptr;
+
+                    default:
+                    {
+                        double number;
+                        return ( ReadNumber( number, text ) == Status::kOk ) ? text : nullptr;
+                    }
+                }
+            }
+
+            const char* SkipContainer( const char* text ) const noexcept
+            {
+                uint32 close = ( text[ 0 ] == '[' ) ? ']' : '}';
+
+                text = SkipWhitespace( text + 1 );
+
+                while ( text && ( Peek( text ) != close ) )
+                {
+                    if ( close == '}' )
+                    {
+                        text = SkipString( text );
+                        text = text ? SkipWhitespace( text ) : nullptr;
+                        text = ( text && ( Peek( text ) == ':' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+                    }
+
+                    text = text ? SkipValue( text ) : nullptr;
+                    text = text ? SkipWhitespace( text ) : nullptr;
+
+                    if ( text && ( Peek( text ) == ',' ) )
+                    {
+                        text = SkipWhitespace( text + 1 );
+                    }
+                    else if ( text && ( Peek( text ) != close ) )
+                    {
+                        text = nullptr;
+                    }
+                }
+
+                return text ? text + 1 : nullptr;
+            }
+
+            const char* FindElement( const char* text, uint32 index ) const noexcept
+            {
+                if ( Peek( text ) != '[' )
+                {
+                    return nullptr;
+                }
+
+                text = SkipWhitespace( text + 1 );
+
+                for ( uint32 a = 0; ( a < index ) && text; a++ )
+                {
+                    text = SkipValue( text );
+                    text = text ? SkipWhitespace( text ) : nullptr;
+                    text = ( text && ( Peek( text ) == ',' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+                }
+
+                return text;
+            }
+
+            // With kKeepLast a repeated name keeps the value of its last occurrence, otherwise of its first.
+            const char* FindMember( const char* text, const ReadPath::Segment& segment ) noexcept
+            {
+                if ( Peek( text ) != '{' )
+                {
+                    return nullptr;
+                }
+
+                const char* found = nullptr;
+
+                text = SkipWhitespace( text + 1 );
+
+                while ( text && ( Peek( text ) == '"' ) )
+                {
+                    bool same = IsName( text, segment );
+
+                    text = SkipString( text );
+                    text = text ? SkipWhitespace( text ) : nullptr;
+                    text = ( text && ( Peek( text ) == ':' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+
+                    if ( text && same )
+                    {
+                        found = text;
+
+                        if ( options.duplicateNames != DuplicateNames::kKeepLast )
+                        {
+                            break;
+                        }
+                    }
+
+                    text = text ? SkipValue( text ) : nullptr;
+                    text = text ? SkipWhitespace( text ) : nullptr;
+                    text = ( text && ( Peek( text ) == ',' ) ) ? SkipWhitespace( text + 1 ) : nullptr;
+                }
+
+                return found;
+            }
+
+            bool IsName( const char* text, const ReadPath::Segment& segment ) const noexcept
+            {
+                int32 textLength;
+                int32 stringLength;
+
+                if ( ( ReadStringLiteral( text + 1, &textLength, &stringLength ) != Status::kOk ) || ( uint32( stringLength ) != segment.length ) )
+                {
+                    return false;
+                }
+
+                if ( stringLength == textLength )
+                {
+                    return SameName( text + 1, uint32( stringLength ), segment.name, segment.length );
+                }
+
+                Array<char> name;
+                bool        same = false;
+
+                Detail::MayThrow(
+                    [ & ]()
+                    {
+                        name.SetArrayElementCount( stringLength );
+                        ReadStringLiteral( text + 1, &textLength, &stringLength, name.begin() );
+                        same = SameName( name.begin(), uint32( stringLength ), segment.name, segment.length );
+
+                        return Status::kOk;
+                    } );
+
+                return same;
+            }
+        };
+
+        void LocateReadFailure( const char* text, uint64 length, const ParseOptions& options, const ReadPath& path, ReadResult& result ) noexcept
+        {
+            Detail::MayThrow(
+                [ & ]()
+                {
+                    String<> pathText;
+
+                    for ( int32 a = path.GetSegmentCount() - 1; a >= 0; a-- )
+                    {
+                        const ReadPath::Segment& segment = path.GetSegment( a );
+
+                        if ( !segment.name )
+                        {
+                            pathText += "[";
+                            pathText += String<>( segment.index );
+                            pathText += "]";
+
+                            continue;
+                        }
+
+                        if ( pathText.GetStringLength() != 0 )
+                        {
+                            pathText += ".";
+                        }
+
+                        for ( uint32 b = 0; b < segment.length; b++ )
+                        {
+                            char c[ 2 ] = { segment.name[ b ], 0 };
+                            pathText += ( c[ 0 ] != 0 ) ? c : "\\u0000";
+                        }
+                    }
+
+                    result.path = static_cast<String<>&&>( pathText );
+
+                    return Status::kOk;
+                } );
+
+            TextLocator locator( text, text + length, options );
+            const char* position = locator.Find( path );
+
+            if ( position )
+            {
+                FindLineAndColumn( text, text + length, position, &result.errorLine, &result.errorColumn );
+            }
+        }
+
+        // Whether the writer writes a number with neither a fraction nor an exponent.
+        inline bool IsIntegerNumber( double number ) noexcept
+        {
+            if ( !( ( number > -1e21 ) && ( number < 1e21 ) ) )
+            {
+                return false;
+            }
+
+            return ( number >= 9.0e18 ) || ( number <= -9.0e18 ) || ( double( int64( number ) ) == number );
+        }
+
+        // Builds a document as Serialize writes it. The elements and members of each array and object wait on the stack
+        // until the Serialize call that opened it returns, so that it is copied into the document once, at its exact
+        // count, as a parsed one is.
+        class Builder
+        {
+        public:
+            struct OpenContainer
+            {
+                uint64 value;
+                uint64 base;
+            };
+
+            StructuredData& document;
+            PendingValues   children;
+            ScratchStack    open;
+            Status          failure = Status::kOk;
+
+            explicit Builder( StructuredData& data ) noexcept : document( data ), children( data ), open( *data.blockSource )
+            {
+            }
+
+            // The first call that fails fails the build, even when the Serialize that made it goes on.
+            Status Record( Status status ) noexcept
+            {
+                failure = ( failure == Status::kOk ) ? status : failure;
+
+                return status;
+            }
+
+            Value& At( uint64 offset ) noexcept
+            {
+                return *children.At<Value>( offset );
+            }
+
+            uint32 GetOpenCount() const noexcept
+            {
+                return uint32( open.GetSize() / sizeof( OpenContainer ) );
+            }
+
+            OpenContainer* GetLastOpen() noexcept
+            {
+                return ( open.GetSize() != 0 ) ? open.At<OpenContainer>( open.GetSize() - sizeof( OpenContainer ) ) : nullptr;
+            }
+
+            bool IsOpen( uint64 value ) noexcept
+            {
+                const OpenContainer* containers = open.At<OpenContainer>( 0 );
+
+                for ( uint32 a = 0; a < GetOpenCount(); a++ )
+                {
+                    if ( containers[ a ].value == value )
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            // Elements and members go only to the array or object opened last.
+            bool IsLastOpen( uint64 value, Type type ) noexcept
+            {
+                const OpenContainer* last = GetLastOpen();
+
+                return last && ( last->value == value ) && ( At( value ).type == type );
+            }
+
+            // A node that is an open array or object takes no other value.
+            Status SetScalar( uint64 value, const Value& scalar ) noexcept
+            {
+                if ( IsOpen( value ) )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                At( value ) = scalar;
+
+                return Status::kOk;
+            }
+
+            Status SetBool( uint64 value, bool boolean ) noexcept
+            {
+                Value scalar;
+
+                scalar.type         = Type::kBool;
+                scalar.data.boolean = boolean;
+
+                return SetScalar( value, scalar );
+            }
+
+            // A number that cannot be written is refused, so that a built document can always be written.
+            Status SetNumber( uint64 value, double number ) noexcept
+            {
+                if ( !( number >= -maxDouble && number <= maxDouble ) )
+                {
+                    return Status::kFloatInvalid;
+                }
+
+                Value scalar;
+
+                scalar.type        = Type::kNumber;
+                scalar.integer     = IsIntegerNumber( number );
+                scalar.data.number = number;
+
+                return SetScalar( value, scalar );
+            }
+
+            Status SetString( uint64 value, const char* text, uint32 length ) noexcept
+            {
+                Value  scalar;
+                Status status = CopyText( text, length, scalar.data.text );
+
+                scalar.type  = Type::kString;
+                scalar.count = length;
+
+                return ( status == Status::kOk ) ? SetScalar( value, scalar ) : status;
+            }
+
+            Status Open( uint64 value, Type type ) noexcept
+            {
+                if ( IsOpen( value ) )
+                {
+                    return IsLastOpen( value, type ) ? Status::kOk : Status::kInvalidValueType;
+                }
+
+                if ( !open.Push( OpenContainer { value, children.GetSize() } ) )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                Value& container = At( value );
+                container        = Value();
+                container.type   = type;
+
+                return Status::kOk;
+            }
+
+            Status AppendElement( uint64 array, uint64& element ) noexcept
+            {
+                if ( !IsLastOpen( array, Type::kArray ) )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                if ( !children.Push( Value() ) )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                element = children.GetSize() - sizeof( Value );
+
+                return Status::kOk;
+            }
+
+            Status AddMember( uint64 object, const char* name, uint32 length, uint64& member ) noexcept
+            {
+                if ( !IsLastOpen( object, Type::kObject ) )
+                {
+                    return Status::kInvalidValueType;
+                }
+
+                const char* copy;
+                Status      status = CopyText( name, length, copy );
+
+                if ( status != Status::kOk )
+                {
+                    return status;
+                }
+
+                PendingMember pending;
+
+                pending.member.name = StringView( copy, length );
+                pending.nameStart   = nullptr;
+
+                if ( !children.Push( pending ) )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                uint64         pendingOffset = children.GetSize() - sizeof( PendingMember );
+                PendingMember* pushed        = children.At<PendingMember>( pendingOffset );
+
+                member = pendingOffset + uint64( reinterpret_cast<char*>( &pushed->member.value ) - reinterpret_cast<char*>( pushed ) );
+
+                return Status::kOk;
+            }
+
+            Status CloseSince( uint32 openCount ) noexcept
+            {
+                while ( GetOpenCount() > openCount )
+                {
+                    OpenContainer container = *GetLastOpen();
+                    Value         closed;
+                    Status        status;
+
+                    open.SetSize( open.GetSize() - sizeof( OpenContainer ) );
+
+                    if ( At( container.value ).type == Type::kArray )
+                    {
+                        status = children.CloseArray( closed, container.base );
+                    }
+                    else
+                    {
+                        status = CloseObject( closed, container.base );
+                    }
+
+                    if ( status != Status::kOk )
+                    {
+                        return status;
+                    }
+
+                    At( container.value ) = closed;
+                }
+
+                return Status::kOk;
+            }
+
+        private:
+            Status CopyText( const char* text, uint32 length, const char*& copy ) noexcept
+            {
+                copy = "";
+
+                if ( length != 0 )
+                {
+                    char* stored = document.AllocateBytes( length );
+
+                    if ( !stored )
+                    {
+                        return Status::kAllocationRefused;
+                    }
+
+                    for ( uint32 a = 0; a < length; a++ )
+                    {
+                        stored[ a ] = text[ a ];
+                    }
+
+                    copy = stored;
+                }
+
+                return Status::kOk;
+            }
+
+            // The parser finds a repeated name among the first members of an object as it reads them, and the builder
+            // when the object closes.
+            Status CloseObject( Value& object, uint64 base ) noexcept
+            {
+                uint32 count = children.GetMemberCount( base );
+
+                if ( count <= uint32( indexedMemberCount ) )
+                {
+                    const PendingMember* pending = children.At<PendingMember>( base );
+
+                    for ( uint32 a = 1; a < count; a++ )
+                    {
+                        for ( uint32 b = 0; b < a; b++ )
+                        {
+                            if ( SameName( pending[ a ].member.name, pending[ b ].member.name ) )
+                            {
+                                return Status::kDuplicateName;
+                            }
+                        }
+                    }
+                }
+
+                const char* repeated = nullptr;
+
+                return children.CloseObject( object, base, DuplicateNames::kReject, repeated );
+            }
+        };
+
+        // A node that was never given, or that AppendElement or AddMember failed to give, has no builder.
+        Status Node::SetNull() noexcept
+        {
+            return builder ? builder->Record( builder->SetScalar( offset, Value() ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::SetBool( bool value ) noexcept
+        {
+            return builder ? builder->Record( builder->SetBool( offset, value ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::SetNumber( double value ) noexcept
+        {
+            return builder ? builder->Record( builder->SetNumber( offset, value ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::SetString( const char* text, uint32 length ) noexcept
+        {
+            return builder ? builder->Record( builder->SetString( offset, text, length ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::SetArray() noexcept
+        {
+            return builder ? builder->Record( builder->Open( offset, Type::kArray ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::SetObject() noexcept
+        {
+            return builder ? builder->Record( builder->Open( offset, Type::kObject ) ) : Status::kInvalidValueType;
+        }
+
+        Status Node::AppendElement( Node& element ) noexcept
+        {
+            uint64 at     = 0;
+            Status status = builder ? builder->Record( builder->AppendElement( offset, at ) ) : Status::kInvalidValueType;
+
+            element.builder = ( status == Status::kOk ) ? builder : nullptr;
+            element.offset  = at;
+
+            return status;
+        }
+
+        Status Node::AddMember( const char* name, uint32 length, Node& member ) noexcept
+        {
+            uint64 at     = 0;
+            Status status = builder ? builder->Record( builder->AddMember( offset, name, length, at ) ) : Status::kInvalidValueType;
+
+            member.builder = ( status == Status::kOk ) ? builder : nullptr;
+            member.offset  = at;
+
+            return status;
+        }
+
+        uint32 Node::GetOpenCount() const noexcept
+        {
+            return builder ? builder->GetOpenCount() : 0;
+        }
+
+        Status Node::CloseSince( uint32 openCount ) noexcept
+        {
+            return builder ? builder->Record( builder->CloseSince( openCount ) ) : Status::kInvalidValueType;
+        }
+
+        Status Serialize( Node node, const Value& value ) noexcept
+        {
+            switch ( value.GetType() )
+            {
+                case Type::kNull:
+                    return node.SetNull();
+
+                case Type::kBool:
+                    return node.SetBool( *value.AsBool() );
+
+                case Type::kNumber:
+                    return node.SetNumber( *value.AsNumber() );
+
+                case Type::kString:
+                    return node.SetString( value.AsString().GetText(), value.AsString().GetLength() );
+
+                case Type::kArray:
+                {
+                    Status status = node.SetArray();
+
+                    for ( const Value& element : value.AsArray() )
+                    {
+                        Node copy;
+
+                        status = ( status == Status::kOk ) ? node.AppendElement( copy ) : status;
+                        status = ( status == Status::kOk ) ? SerializeValue( copy, element ) : status;
+                    }
+
+                    return status;
+                }
+
+                case Type::kObject:
+                {
+                    Status status = node.SetObject();
+
+                    for ( const Member& member : value.AsObject() )
+                    {
+                        Node copy;
+
+                        status = ( status == Status::kOk ) ? node.AddMember( member.GetName().GetText(), member.GetName().GetLength(), copy ) : status;
+                        status = ( status == Status::kOk ) ? SerializeValue( copy, member.GetValue() ) : status;
+                    }
+
+                    return status;
+                }
+            }
+
+            return Status::kInvalidValueType;
+        }
+
+        // Puts the position of a member into the index of a large object, which holds the positions of count members.
+        void InsertIntoIndex( const Member* members, uint32* index, uint32 count, uint32 position ) noexcept
+        {
+            const StringView& name = members[ position ].GetName();
+            uint32            slot = FindIndexSlot( members, index, count, name.GetText(), name.GetLength() );
+
+            for ( uint32 a = count; a > slot; a-- )
+            {
+                index[ a ] = index[ a - 1 ];
+            }
+
+            index[ slot ] = position;
+        }
+
+        // An edit is refused while a build is open, and for a value that is not of the type it needs or not in one of
+        // this document's blocks, such as a value of another document.
+        Status StructuredData::CheckEdit( const Value& target, Type type ) const noexcept
+        {
+            if ( builder || ( target.type != type ) )
+            {
+                return Status::kInvalidValueType;
+            }
+
+            machine_address address = reinterpret_cast<machine_address>( &target );
+
+            for ( const Block* block = blocks; block; block = block->next )
+            {
+                machine_address start = reinterpret_cast<machine_address>( block + 1 );
+                machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
+
+                if ( ( address >= start ) && ( address < end ) )
+                {
+                    return Status::kOk;
+                }
+            }
+
+            return Status::kInvalidValueType;
+        }
+
+        // The builder lives in a block of its own, handed back when the build ends.
+        Status StructuredData::BeginBuild( const Edit& edit, Node& rootNode ) noexcept
+        {
+            Status status = builder ? Status::kInvalidValueType : Status::kOk;
+
+            switch ( edit.kind )
+            {
+                case EditKind::kDocument:
+                    break;
+
+                case EditKind::kReplace:
+                    status = CheckEdit( *edit.target, edit.target->type );
+                    break;
+
+                case EditKind::kAppend:
+                    status = CheckEdit( *edit.target, Type::kArray );
+                    break;
+
+                case EditKind::kAddMember:
+                    status = CheckEdit( *edit.target, Type::kObject );
+                    status = ( ( status == Status::kOk ) && edit.target->AsObject().Find( edit.name, edit.length ) ) ? Status::kDuplicateName : status;
+                    break;
+            }
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            if ( edit.kind == EditKind::kDocument )
+            {
+                Clear();
+            }
+
+            void* memory = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
+
+            if ( !memory )
+            {
+                return Status::kAllocationRefused;
+            }
+
+            builder          = new ( memory ) Builder( *this );
+            rootNode.builder = builder;
+            rootNode.offset  = 0;
+
+            return builder->children.Push( Value() ) ? Status::kOk : Status::kAllocationRefused;
+        }
+
+        // The edit is made only when its value is built, so that a failed edit leaves the document as it was. A failed
+        // SerializeFrom leaves it empty.
+        Status StructuredData::EndBuild( const Edit& edit, const Node& rootNode, Status status ) noexcept
+        {
+            if ( !rootNode.builder )
+            {
+                return status;
+            }
+
+            status      = ( status == Status::kOk ) ? builder->failure : status;
+            Value built = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
+
+            builder->~Builder();
+            blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
+            builder = nullptr;
+
+            status = ( status == Status::kOk ) ? Splice( edit, built ) : status;
+
+            if ( ( status != Status::kOk ) && ( edit.kind == EditKind::kDocument ) )
+            {
+                Clear();
+            }
+
+            return status;
+        }
+
+        Status StructuredData::Splice( const Edit& edit, const Value& built ) noexcept
+        {
+            if ( edit.kind == EditKind::kDocument )
+            {
+                Value* value = static_cast<Value*>( AllocateAligned( sizeof( Value ) ) );
+
+                if ( !value )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                *value = built;
+                root   = value;
+
+                return Status::kOk;
+            }
+
+            Value& target = const_cast<Value&>( *edit.target );
+
+            if ( edit.kind == EditKind::kReplace )
+            {
+                target = built;
+
+                return Status::kOk;
+            }
+
+            const char* name = "";
+
+            if ( edit.length != 0 )
+            {
+                char* copy = AllocateBytes( edit.length );
+
+                if ( !copy )
+                {
+                    return Status::kAllocationRefused;
+                }
+
+                for ( uint32 a = 0; a < edit.length; a++ )
+                {
+                    copy[ a ] = edit.name[ a ];
+                }
+
+                name = copy;
+            }
+
+            if ( !MakeRoom( target ) )
+            {
+                return Status::kAllocationRefused;
+            }
+
+            if ( edit.kind == EditKind::kAppend )
+            {
+                const_cast<Value*>( target.data.elements )[ target.count++ ] = built;
+
+                return Status::kOk;
+            }
+
+            Member* members = const_cast<Member*>( target.data.members );
+            uint32  room    = target.GetCapacity();
+
+            members[ target.count ].name  = StringView( name, edit.length );
+            members[ target.count ].value = built;
+
+            if ( room > uint32( indexedMemberCount ) )
+            {
+                InsertIntoIndex( members, reinterpret_cast<uint32*>( members + room ), target.count, target.count );
+            }
+
+            target.count++;
+
+            return Status::kOk;
+        }
+
+        // Gives an array or object room for one more element or member. The first edit that adds to one moves it into
+        // room for a power of two of them, at least 4, which doubles when it is full. An object with room for more
+        // than 16 members keeps its index after that room, even while it has fewer members.
+        bool StructuredData::MakeRoom( Value& container ) noexcept
+        {
+            uint32 count    = container.count;
+            uint32 capacity = container.GetCapacity();
+
+            if ( ( container.capacityShift != 0 ) && ( count < capacity ) )
+            {
+                return true;
+            }
+
+            uint8 shift = 2;
+
+            while ( ( shift < 31 ) && ( ( uint32( 1 ) << shift ) <= count ) )
+            {
+                shift++;
+            }
+
+            uint32 room = uint32( 1 ) << shift;
+
+            if ( room <= count )
+            {
+                return false;
+            }
+
+            bool   isObject  = container.type == Type::kObject;
+            uint64 itemSize  = isObject ? sizeof( Member ) : sizeof( Value );
+            bool   indexed   = isObject && ( room > uint32( indexedMemberCount ) );
+            uint64 indexSize = indexed ? uint64( room ) * sizeof( uint32 ) : 0;
+            char*  storage   = static_cast<char*>( AllocateAligned( uint64( room ) * itemSize + indexSize ) );
+
+            if ( !storage )
+            {
+                return false;
+            }
+
+            if ( count != 0 )
+            {
+                CopyWords( storage, isObject ? static_cast<const void*>( container.data.members ) : container.data.elements, uint64( count ) * itemSize );
+            }
+
+            if ( indexed )
+            {
+                const Member* members = reinterpret_cast<const Member*>( storage );
+                uint32*       index   = reinterpret_cast<uint32*>( storage + uint64( room ) * itemSize );
+
+                if ( capacity > uint32( indexedMemberCount ) )
+                {
+                    const uint32* oldIndex = reinterpret_cast<const uint32*>( container.data.members + capacity );
+
+                    for ( uint32 a = 0; a < count; a++ )
+                    {
+                        index[ a ] = oldIndex[ a ];
+                    }
+                }
+                else
+                {
+                    for ( uint32 a = 0; a < count; a++ )
+                    {
+                        InsertIntoIndex( members, index, a, a );
+                    }
+                }
+            }
+
+            if ( isObject )
+            {
+                container.data.members = reinterpret_cast<const Member*>( storage );
+            }
+            else
+            {
+                container.data.elements = reinterpret_cast<const Value*>( storage );
+            }
+
+            container.capacityShift = shift;
+
+            return true;
+        }
+
+        Status StructuredData::RemoveElement( const Value& array, uint32 index ) noexcept
+        {
+            Status status = CheckEdit( array, Type::kArray );
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            if ( index >= array.count )
+            {
+                return Status::kIndexOutOfRange;
+            }
+
+            Value& edited   = const_cast<Value&>( array );
+            Value* elements = const_cast<Value*>( edited.data.elements );
+
+            for ( uint32 a = index + 1; a < edited.count; a++ )
+            {
+                elements[ a - 1 ] = elements[ a ];
+            }
+
+            edited.count--;
+
+            return Status::kOk;
+        }
+
+        // An object keeps its room, and its index stays valid for no members.
+        Status StructuredData::EmptyObject( const Value& object ) noexcept
+        {
+            Status status = CheckEdit( object, Type::kObject );
+
+            if ( status == Status::kOk )
+            {
+                const_cast<Value&>( object ).count = 0;
+            }
+
+            return status;
+        }
+
+        // The members after the one removed move down, so that the others keep their order. An object without room to
+        // spare keeps its index right after its members, so the index moves down with them.
+        Status StructuredData::RemoveMember( const Value& object, const char* name, uint32 length ) noexcept
+        {
+            Status status = CheckEdit( object, Type::kObject );
+
+            if ( status != Status::kOk )
+            {
+                return status;
+            }
+
+            if ( !name )
+            {
+                return Status::kNameNotPresent;
+            }
+
+            Value&  edited   = const_cast<Value&>( object );
+            Member* members  = const_cast<Member*>( edited.data.members );
+            uint32  count    = edited.count;
+            uint32  capacity = edited.GetCapacity();
+            uint32* index    = ( capacity > uint32( indexedMemberCount ) ) ? reinterpret_cast<uint32*>( members + capacity ) : nullptr;
+            uint32  slot     = 0;
+            uint32  position = 0;
+
+            if ( index )
+            {
+                slot     = FindIndexSlot( members, index, count, name, length );
+                position = ( slot < count ) ? index[ slot ] : count;
+            }
+            else
+            {
+                while ( ( position < count ) && !SameName( members[ position ].name.GetText(), members[ position ].name.GetLength(), name, length ) )
+                {
+                    position++;
+                }
+            }
+
+            if ( ( position == count ) || !SameName( members[ position ].name.GetText(), members[ position ].name.GetLength(), name, length ) )
+            {
+                return Status::kNameNotPresent;
+            }
+
+            for ( uint32 a = position + 1; a < count; a++ )
+            {
+                members[ a - 1 ] = members[ a ];
+            }
+
+            uint32 room = ( edited.capacityShift != 0 ) ? capacity : count - 1;
+
+            if ( room > uint32( indexedMemberCount ) )
+            {
+                uint32* movedIndex = reinterpret_cast<uint32*>( members + room );
+                uint32  kept       = 0;
+
+                for ( uint32 a = 0; a < count; a++ )
+                {
+                    if ( a != slot )
+                    {
+                        movedIndex[ kept++ ] = index[ a ] - uint32( index[ a ] > position );
+                    }
+                }
+            }
+
+            edited.count = count - 1;
+
+            return Status::kOk;
+        }
+
+    } // namespace Json
+} // namespace C4

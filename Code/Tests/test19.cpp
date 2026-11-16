@@ -2,11 +2,9 @@
 
 #include <chrono>
 
-namespace V3 = Json::V3;
-
-V3::ObjectView Root( const V3::StructuredData& sd )
+Json::ObjectView Root( const Json::StructuredData& sd )
 {
-    return sd.GetRoot() ? sd.GetRoot()->AsObject() : V3::ObjectView();
+    return sd.GetRoot() ? sd.GetRoot()->AsObject() : Json::ObjectView();
 }
 
 // Names that share a long prefix and come in falling order, the order that is slowest to keep sorted one name at a time.
@@ -40,11 +38,11 @@ void TestManyNames()
 
     auto start = std::chrono::steady_clock::now();
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.ParseText( text.begin(), Terathon::uint64( text.GetArrayElementCount() ) ).status, Json::Status::kOk, "parse an object of many names" );
 
-    V3::ObjectView root  = Root( sd );
-    bool           found = root.GetMemberCount() == Terathon::uint32( count );
+    Json::ObjectView root  = Root( sd );
+    bool             found = root.GetMemberCount() == Terathon::uint32( count );
 
     for ( int a = 0; found && ( a < count ); a++ )
     {
@@ -109,7 +107,7 @@ LargeObject MakeLargeObject( bool early = false )
     return object;
 }
 
-void CheckMembers( V3::ObjectView root, double k5, double k25, const char* description )
+void CheckMembers( Json::ObjectView root, double k5, double k25, const char* description )
 {
     static const int removed[] = { 22, 30, 36 };
 
@@ -138,8 +136,8 @@ void TestRepeatedNames()
 {
     LargeObject object = MakeLargeObject();
 
-    V3::StructuredData sd;
-    Json::ParseResult  result = ParseText( sd, object.text );
+    Json::StructuredData sd;
+    Json::ParseResult    result = ParseText( sd, object.text );
 
     CheckStatus( result.status, Json::Status::kDuplicateName, "repeated names in a large object are rejected" );
     Check( ( result.errorLine == 1 ) && ( result.errorColumn == object.nameColumn[ 22 ] ), "the earliest repeat is reported" );
@@ -206,8 +204,8 @@ Terathon::String<> MakeMembers( const char* prefix, int count, const char* repea
 // Large objects inside large objects, each settling its own repeated names when it closes.
 void TestNestedLargeObjects()
 {
-    V3::StructuredData sd;
-    int                repeatColumn = 0;
+    Json::StructuredData sd;
+    int                  repeatColumn = 0;
 
     // The outer object repeats o0 after a large inner object.
     Terathon::String<> outer = MakeMembers( "o", 17, nullptr, nullptr, 0 );
@@ -236,8 +234,8 @@ void TestNestedLargeObjects()
     options.duplicateNames = Json::DuplicateNames::kKeepLast;
     CheckStatus( ParseText( sd, outer, options ).status, Json::Status::kOk, "keep the last of repeats in nested large objects" );
 
-    V3::ObjectView root        = Root( sd );
-    V3::ObjectView innerObject = root.FindObject( "o18" );
+    Json::ObjectView root        = Root( sd );
+    Json::ObjectView innerObject = root.FindObject( "o18" );
 
     Check( ( root.GetMemberCount() == 18 ) && root.FindNumber( "o1" ) && ( *root.FindNumber( "o1" ) == 17 ),
            "the outer object keeps the last value of its repeat" );
@@ -251,11 +249,11 @@ void TestBuiltByHand()
     const int count = 100;
     char      name[ 16 ];
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, "{}" ).status, Json::Status::kOk, "parse an empty object" );
 
-    const V3::Value& root   = *sd.GetRoot();
-    V3::ObjectView   object = root.AsObject();
+    const Json::Value& root   = *sd.GetRoot();
+    Json::ObjectView   object = root.AsObject();
 
     for ( int a = 0; a < count; a++ )
     {

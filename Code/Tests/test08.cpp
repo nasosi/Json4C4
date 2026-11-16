@@ -1,7 +1,5 @@
 #include "TestCheck.h"
 
-namespace V3 = Json::V3;
-
 struct ConformanceCase
 {
     const char*  text;
@@ -76,7 +74,7 @@ const ConformanceCase conformanceCases[] = {
     CASE( "[,1]", kExpectedJsonValue ),
     CASE( "{\"a\":1,}", kExpectedJsonValue ),
     CASE( "{\"a\" 1}", kExpectedColon ),
-    CASE( "{1:1}", kExpectedBeginingDoubleQuotes ),
+    CASE( "{1:1}", kExpectedBeginningDoubleQuotes ),
     CASE( "[1", kExpectedClosingSquareBracketsOrComma ),
     CASE( "{\"a\":1", kExpectedClosingCurlyBracesOrComma ),
     CASE( " ", kExpectedJsonValue ),
@@ -87,21 +85,21 @@ const ConformanceCase conformanceCases[] = {
     CASE( "", kTextBufferContentsInvalid ),
 };
 
-const double* RootNumber( const V3::StructuredData& sd )
+const double* RootNumber( const Json::StructuredData& sd )
 {
     return sd.GetRoot() ? sd.GetRoot()->AsNumber() : nullptr;
 }
 
-V3::StringView RootString( const V3::StructuredData& sd )
+Json::StringView RootString( const Json::StructuredData& sd )
 {
-    return sd.GetRoot() ? sd.GetRoot()->AsString() : V3::StringView();
+    return sd.GetRoot() ? sd.GetRoot()->AsString() : Json::StringView();
 }
 
 int main()
 {
     for ( const ConformanceCase& conformanceCase : conformanceCases )
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         Json::ParseResult parseResult = ParseText( sd, conformanceCase.text, conformanceCase.length );
 
@@ -110,7 +108,7 @@ int main()
     }
 
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         ParseText( sd, "5" );
         Check( RootNumber( sd ) && *RootNumber( sd ) == 5.0, "single digit root" );

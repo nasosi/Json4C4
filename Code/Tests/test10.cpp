@@ -7,8 +7,6 @@
 #    include <string>
 #    include <vector>
 
-namespace V3 = Json::V3;
-
 struct Strings
 {
     Terathon::String<> name;
@@ -47,14 +45,14 @@ struct Number
 #    define NUMBER_PROTO "value", object.value
 DEFINE_JSON4C4_FUNCTIONS( Number, NUMBER_PROTO )
 
-V3::ObjectView RootObject( const V3::StructuredData& sd )
+Json::ObjectView RootObject( const Json::StructuredData& sd )
 {
-    return sd.GetRoot() ? sd.GetRoot()->AsObject() : V3::ObjectView();
+    return sd.GetRoot() ? sd.GetRoot()->AsObject() : Json::ObjectView();
 }
 
 void TestEscaping()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     CheckStatus(
         ParseText(
@@ -72,10 +70,10 @@ void TestEscaping()
 
     CheckStatus( sd.Write( "Data/Test/out_test10_escaping.json" ), Json::Status::kOk, "write strings" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test10_escaping.json" ).status, Json::Status::kOk, "reparse escaped strings" );
 
-    V3::ObjectView root = RootObject( reparsed );
+    Json::ObjectView root = RootObject( reparsed );
     Check( root && root.FindBool( "admin" ) == nullptr, "no injected member" );
     Check( root && root.GetMemberCount() == 3, "three members after the round trip" );
 
@@ -83,7 +81,7 @@ void TestEscaping()
     CheckStatus( reparsed.DeserializeTo( roundTrip ), Json::Status::kOk, "deserialize reparsed strings" );
     Check( roundTrip.name == original.name && roundTrip.path == original.path && roundTrip.control == original.control, "strings survive the round trip" );
 
-    V3::StructuredData keys;
+    Json::StructuredData keys;
     CheckStatus( ParseText( keys, "{\"a\\\"b\\\\c\\n\":1}" ).status, Json::Status::kOk, "parse a key that needs escaping" );
     CheckStatus( keys.Write( "Data/Test/out_test10_keys.json" ), Json::Status::kOk, "write a key that needs escaping" );
     CheckStatus( reparsed.Parse( "Data/Test/out_test10_keys.json" ).status, Json::Status::kOk, "reparse a key that needs escaping" );
@@ -98,7 +96,7 @@ void TestNonFinite()
     Number number;
     number.value = huge * 10.0;
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.SerializeFrom( number ), Json::Status::kFloatInvalid, "infinity is not serialized" );
 
     number.value = huge * 10.0 - huge * 10.0;
@@ -119,7 +117,7 @@ void TestNoRoot()
 {
     remove( "Data/Test/out_test10_noroot.json" );
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.Write( "Data/Test/out_test10_noroot.json" ), Json::Status::kInvalidStructuredData, "write without a root" );
 
     FILE* file = fopen( "Data/Test/out_test10_noroot.json", "rb" );
@@ -141,16 +139,16 @@ void TestMaps()
     maps.m.InsertMapElement( element );
     maps.sm[ "y" ] = 7;
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.SerializeFrom( maps ), Json::Status::kOk, "serialize maps" );
     CheckStatus( sd.Write( "Data/Test/out_test10_maps.json" ), Json::Status::kOk, "write maps" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test10_maps.json" ).status, Json::Status::kOk, "reparse maps" );
 
-    V3::ObjectView root = RootObject( reparsed );
-    V3::ObjectView m    = root.FindObject( "m" );
-    V3::ObjectView sm   = root.FindObject( "sm" );
+    Json::ObjectView root = RootObject( reparsed );
+    Json::ObjectView m    = root.FindObject( "m" );
+    Json::ObjectView sm   = root.FindObject( "sm" );
 
     Check( m.FindNumber( "x" ) && *m.FindNumber( "x" ) == 42, "ObjectMap member is written" );
     Check( sm.FindNumber( "y" ) && *sm.FindNumber( "y" ) == 7, "std::map member is written" );
@@ -167,14 +165,14 @@ void TestVectors()
     vectors.rows     = { { 1, 2 }, {}, { 3 } };
     vectors.names    = { "a", "b\"c" };
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.SerializeFrom( vectors ), Json::Status::kOk, "serialize vectors" );
     CheckStatus( sd.Write( "Data/Test/out_test10_vectors.json" ), Json::Status::kOk, "write vectors" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test10_vectors.json" ).status, Json::Status::kOk, "reparse vectors" );
 
-    V3::ObjectView root = RootObject( reparsed );
+    Json::ObjectView root = RootObject( reparsed );
     Check( root.FindArray( "linespec" ).GetElementCount() == 3, "vector member is an array" );
 
     Vectors roundTrip;
@@ -192,7 +190,7 @@ void TestVectors()
 
 void TestOverwrite()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     CheckStatus( ParseText( sd, "{\"a\":1,\"b\":\"long string value that makes the first file long\"}" ).status, Json::Status::kOk, "parse the long document" );
     CheckStatus( sd.Write( "Data/Test/out_test10_overwrite.json" ), Json::Status::kOk, "write the long document" );
@@ -200,7 +198,7 @@ void TestOverwrite()
     CheckStatus( ParseText( sd, "{\"a\":1}" ).status, Json::Status::kOk, "parse the short document" );
     CheckStatus( sd.Write( "Data/Test/out_test10_overwrite.json" ), Json::Status::kOk, "write the short document" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test10_overwrite.json" ).status, Json::Status::kOk, "overwriting with a shorter document truncates the file" );
 }
 
@@ -215,11 +213,11 @@ void TestNumbers()
         numbers.AppendArrayElement( value );
     }
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.SerializeFrom( numbers ), Json::Status::kOk, "serialize numbers" );
     CheckStatus( sd.Write( "Data/Test/out_test10_numbers.json" ), Json::Status::kOk, "write numbers" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test10_numbers.json" ).status, Json::Status::kOk, "reparse numbers" );
 
     Terathon::Array<double> roundTrip;
@@ -260,7 +258,7 @@ void TestNumberLayout()
         numbers.AppendArrayElement( layout.value );
     }
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.SerializeFrom( numbers ), Json::Status::kOk, "serialize the layout numbers" );
     CheckStatus( sd.Write( "Data/Test/out_test10_layout.json" ), Json::Status::kOk, "write the layout numbers" );
 
@@ -284,12 +282,12 @@ void TestNumberLayout()
 
 void TestInvalidStrings()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, "[\"text\"]" ).status, Json::Status::kOk, "parse a string" );
 
     Check( WriteTextFile( "Data/Test/out_test10_invalid.json", "[1]" ), "write the file to keep" );
 
-    const V3::Value& string = sd.GetRoot()->AsArray()[ 0 ];
+    const Json::Value& string = sd.GetRoot()->AsArray()[ 0 ];
 
     const char* invalid[] = { "\xFF", "a\xC3", "\xED\xA0\x80", "\xC0\xAF", "\xF4\x90\x80\x80" };
 
@@ -329,7 +327,7 @@ void TestLargeFile()
 
     Check( WriteTextFile( "Data/Test/out_test10_large.json", text.c_str() ), "write the large file" );
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( sd.Parse( "Data/Test/out_test10_large.json" ).status, Json::Status::kOk, "parse a file over 64 KB" );
 
     Terathon::Array<double> numbers;

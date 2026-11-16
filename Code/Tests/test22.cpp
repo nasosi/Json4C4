@@ -1,4 +1,4 @@
-// The 3.0 read layer: Validate and DeserializeTo give what 2.x gives for the same structures and texts, and Read reports
+// Reading into structures: Validate and DeserializeTo give what 2.3.0 gave for the same structures and texts, and Read reports
 // the path and the position of the value at fault.
 
 #include "TestCheck.h"
@@ -6,8 +6,6 @@
 #include <map>
 #include <string>
 #include <vector>
-
-namespace V3 = Json::V3;
 
 using Terathon::Array;
 using Terathon::String;
@@ -78,7 +76,7 @@ const char* const valid = R"({
 // Writes what a manifest serializes to, so that two manifests can be compared.
 String<> WriteManifest( const Manifest& manifest )
 {
-    V3::StructuredData    data;
+    Json::StructuredData  data;
     Terathon::Array<char> text;
 
     if ( ( data.SerializeFrom( manifest ) != Json::Status::kOk ) || ( data.Write( text ) != Json::Status::kOk ) )
@@ -91,61 +89,33 @@ String<> WriteManifest( const Manifest& manifest )
     return String<>( text.begin() );
 }
 
-// The results of 2.x and of 3.0, to check against what 2.3.0 gave.
-ResultHash oldResults;
-ResultHash newResults;
+// The results of reading the manifests, to check against what 2.3.0 gave.
+ResultHash results;
 
-// Deserializes and validates a text with 2.x and with 3.0, and checks that both give the same statuses and manifests.
-void CheckSameAs2x( const char* text, const char* description )
+// Validates and deserializes a text, and adds the statuses and the manifest read to the results.
+void AddResults( const char* text )
 {
-    Json::StructuredData oldData;
-    V3::StructuredData   newData;
-    Manifest             oldManifest;
-    Manifest             newManifest;
+    Json::StructuredData data;
+    Manifest             manifest;
+    Json::Status         parse = data.ParseText( text, strlen( text ) ).status;
 
-    Json::Status oldParse = ParseText( oldData, text ).status;
-    Json::Status newParse = newData.ParseText( text, strlen( text ) ).status;
+    results.Add( parse );
 
-    oldResults.Add( oldParse );
-    newResults.Add( newParse );
-    Check( oldParse == newParse, description );
-
-    if ( oldParse != Json::Status::kOk )
+    if ( parse != Json::Status::kOk )
     {
         return;
     }
 
-    Json::Status oldValidate    = Json::Validate( oldData, oldManifest );
-    Json::Status newValidate    = V3::Validate( newData, newManifest );
-    Json::Status oldDeserialize = oldData.DeserializeTo( oldManifest );
-    Json::Status newDeserialize = newData.DeserializeTo( newManifest );
+    Json::Status validate    = Json::Validate( data, manifest );
+    Json::Status deserialize = data.DeserializeTo( manifest );
 
-    oldResults.Add( oldValidate );
-    oldResults.Add( oldDeserialize );
-    newResults.Add( newValidate );
-    newResults.Add( newDeserialize );
+    results.Add( validate );
+    results.Add( deserialize );
 
-    if ( ( oldValidate != newValidate ) || ( oldDeserialize != newDeserialize ) )
+    if ( deserialize == Json::Status::kOk )
     {
-        fprintf( stderr,
-                 "%s: validate %u and %u, deserialize %u and %u\n",
-                 description,
-                 unsigned( oldValidate ),
-                 unsigned( newValidate ),
-                 unsigned( oldDeserialize ),
-                 unsigned( newDeserialize ) );
-    }
-
-    Check( ( oldValidate == newValidate ) && ( oldDeserialize == newDeserialize ), description );
-
-    if ( oldDeserialize == Json::Status::kOk )
-    {
-        String<> oldText = WriteManifest( oldManifest );
-        String<> newText = WriteManifest( newManifest );
-
-        oldResults.Add( static_cast<const char*>( oldText ), size_t( oldText.GetStringLength() ) );
-        newResults.Add( static_cast<const char*>( newText ), size_t( newText.GetStringLength() ) );
-        Check( strcmp( oldText, newText ) == 0, description );
+        String<> written = WriteManifest( manifest );
+        results.Add( static_cast<const char*>( written ), size_t( written.GetStringLength() ) );
     }
 }
 
@@ -194,14 +164,13 @@ void TestSameAs2x()
 
     for ( const Case& c : cases )
     {
-        CheckSameAs2x( Replace( c.from, c.to ), c.description );
+        AddResults( Replace( c.from, c.to ) );
     }
 
-    CheckSameAs2x( "{ \"file_format_version\": \"1\", \"layer\": [] }", "an array for a structure" );
-    CheckSameAs2x( "[ 1 ]", "an array for the root" );
+    AddResults( "{ \"file_format_version\": \"1\", \"layer\": [] }" );
+    AddResults( "[ 1 ]" );
 
-    CheckHash( oldResults.Take(), 0x213AEAF2385B0095ULL, "2.x reads the manifests as 2.3.0 did" );
-    CheckHash( newResults.Take(), 0x213AEAF2385B0095ULL, "3.0 reads the manifests as 2.3.0 did" );
+    CheckHash( results.Take(), 0x213AEAF2385B0095ULL, "the manifests read as 2.3.0 read them" );
 }
 
 // Reads a manifest and checks the status and path, and that the position is where marker begins, offset by offset.
@@ -218,7 +187,7 @@ void CheckRead( const char*          text,
 
     options.duplicateNames = duplicateNames;
 
-    V3::ReadResult result = V3::Read( text, strlen( text ), manifest, options );
+    Json::ReadResult result = Json::Read( text, strlen( text ), manifest, options );
 
     int line   = 0;
     int column = 0;
@@ -312,7 +281,7 @@ void TestRead()
     CheckRead( "{ \"file_format_version\": 1 ", Json::Status::kExpectedClosingCurlyBracesOrComma, "", "{", 27, "a text that does not parse" );
 
     Manifest manifest;
-    CheckStatus( V3::Read( "Data/Examples/missing.json", manifest ).status, Json::Status::kFileOpenError, "read a missing file" );
+    CheckStatus( Json::Read( "Data/Examples/missing.json", manifest ).status, Json::Status::kFileOpenError, "read a missing file" );
 }
 
 struct Holder
@@ -330,11 +299,11 @@ void TestOptionalMembers()
 
     Holder holder;
 
-    V3::ReadResult result = V3::Read( text, strlen( text ), holder );
+    Json::ReadResult result = Json::Read( text, strlen( text ), holder );
     CheckStatus( result.status, Json::Status::kNameNotPresent, "an incomplete optional member" );
     Check( strcmp( result.path, "settings.enabled" ) == 0, "an incomplete optional member is reported" );
 
-    CheckStatus( V3::Read( "{}", 2, holder ).status, Json::Status::kOk, "an optional member left out" );
+    CheckStatus( Json::Read( "{}", 2, holder ).status, Json::Status::kOk, "an optional member left out" );
 }
 
 int main()

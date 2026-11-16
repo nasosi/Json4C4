@@ -3,7 +3,6 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
-namespace V3   = Json::V3;
 
 struct ObjectInObjectArray
 {
@@ -36,7 +35,7 @@ struct RootObject
 
 int main()
 {
-    V3::StructuredData jSd;
+    Json::StructuredData jSd;
 
     auto parseResult = jSd.Parse( "Data/Test/test_file02.json" );
 
@@ -83,7 +82,7 @@ int main()
         return 1;
     }
 
-    V3::StructuredData jSd2;
+    Json::StructuredData jSd2;
 
     parseResult = jSd2.Parse( "Data/Test/test_file02b.json" );
 

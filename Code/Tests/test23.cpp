@@ -1,4 +1,4 @@
-// The 3.0 builder: SerializeFrom writes what 2.x writes for the same structures, the document it builds reads back the
+// The builder: SerializeFrom writes what 2.3.0 wrote for the same structures, the document it builds reads back the
 // same, every allocation goes through the block source, and repeated names and misuse fail.
 
 #include "TestCheck.h"
@@ -10,14 +10,12 @@
 #include <string>
 #include <vector>
 
-namespace V3 = Json::V3;
-
 using Terathon::Array;
 using Terathon::String;
 
 // Hands out blocks with malloc, refuses the requests from refusedFirst to refusedLast, and checks that every block comes
 // back once with its size.
-class CountingSource final : public V3::BlockSource
+class CountingSource final : public Json::BlockSource
 {
 public:
     int64_t requestCount     = 0;
@@ -129,23 +127,7 @@ void MakeShape( Shape& shape )
     shape.matrix[ 0 ].AppendArrayElement( 0.1 );
 }
 
-String<> WriteOld( const Shape& shape )
-{
-    Json::StructuredData  sd;
-    Terathon::Array<char> text;
-    Terathon::Array<char> indentation;
-
-    if ( ( sd.SerializeFrom( shape ) != Json::Status::kOk ) || ( sd.GetRootJsonValue()->Write( text, 2, ' ', indentation ) != Json::Status::kOk ) )
-    {
-        return "(2.x failed)";
-    }
-
-    text.AppendArrayElement( 0 );
-
-    return String<>( text.begin() );
-}
-
-String<> WriteNew( const V3::StructuredData& data )
+String<> WriteNew( const Json::StructuredData& data )
 {
     Terathon::Array<char> text;
 
@@ -160,7 +142,7 @@ String<> WriteNew( const V3::StructuredData& data )
 }
 
 // Whether two values are the same, down to whether each number is an integer.
-bool Same( const V3::Value& left, const V3::Value& right )
+bool Same( const Json::Value& left, const Json::Value& right )
 {
     if ( ( left.GetType() != right.GetType() ) || ( left.IsInteger() != right.IsInteger() ) )
     {
@@ -169,23 +151,23 @@ bool Same( const V3::Value& left, const V3::Value& right )
 
     switch ( left.GetType() )
     {
-        case V3::Type::kNull:
+        case Json::Type::kNull:
             return true;
 
-        case V3::Type::kBool:
+        case Json::Type::kBool:
             return *left.AsBool() == *right.AsBool();
 
-        case V3::Type::kNumber:
+        case Json::Type::kNumber:
             return *left.AsNumber() == *right.AsNumber();
 
-        case V3::Type::kString:
+        case Json::Type::kString:
             return left.AsString() == right.AsString();
 
-        case V3::Type::kArray:
+        case Json::Type::kArray:
         {
-            V3::ArrayView leftArray  = left.AsArray();
-            V3::ArrayView rightArray = right.AsArray();
-            bool          same       = leftArray.GetElementCount() == rightArray.GetElementCount();
+            Json::ArrayView leftArray  = left.AsArray();
+            Json::ArrayView rightArray = right.AsArray();
+            bool            same       = leftArray.GetElementCount() == rightArray.GetElementCount();
 
             for ( Terathon::uint32 a = 0; same && ( a < leftArray.GetElementCount() ); a++ )
             {
@@ -195,16 +177,16 @@ bool Same( const V3::Value& left, const V3::Value& right )
             return same;
         }
 
-        case V3::Type::kObject:
+        case Json::Type::kObject:
         {
-            V3::ObjectView leftObject  = left.AsObject();
-            V3::ObjectView rightObject = right.AsObject();
-            bool           same        = leftObject.GetMemberCount() == rightObject.GetMemberCount();
+            Json::ObjectView leftObject  = left.AsObject();
+            Json::ObjectView rightObject = right.AsObject();
+            bool             same        = leftObject.GetMemberCount() == rightObject.GetMemberCount();
 
             for ( Terathon::uint32 a = 0; same && ( a < leftObject.GetMemberCount() ); a++ )
             {
-                const V3::Member& leftMember  = leftObject.begin()[ a ];
-                const V3::Member& rightMember = rightObject.begin()[ a ];
+                const Json::Member& leftMember  = leftObject.begin()[ a ];
+                const Json::Member& rightMember = rightObject.begin()[ a ];
 
                 same = ( leftMember.GetName() == rightMember.GetName() ) && Same( leftMember.GetValue(), rightMember.GetValue() );
             }
@@ -218,8 +200,8 @@ bool Same( const V3::Value& left, const V3::Value& right )
 
 void TestSameAs2x()
 {
-    Shape              shape;
-    V3::StructuredData data;
+    Shape                shape;
+    Json::StructuredData data;
 
     MakeShape( shape );
     CheckStatus( data.SerializeFrom( shape ), Json::Status::kOk, "serialize a structure" );
@@ -228,29 +210,26 @@ void TestSameAs2x()
     ResultHash writtenHash;
 
     writtenHash.Add( static_cast<const char*>( written ), size_t( written.GetStringLength() ) );
-    Check( strcmp( WriteOld( shape ), written ) == 0, "2.x and 3.0 write the same text" );
-    CheckHash( writtenHash.Take(), 0x04DF0B9ACCBA6B95ULL, "3.0 writes the structure as 2.3.0 did" );
+    CheckHash( writtenHash.Take(), 0x04DF0B9ACCBA6B95ULL, "a structure is written as 2.3.0 wrote it" );
 
     // The built document and the one parsed from its text are the same, integers included.
-    V3::StructuredData parsed;
+    Json::StructuredData parsed;
     CheckStatus( parsed.ParseText( written, Terathon::uint64( written.GetStringLength() ) ).status, Json::Status::kOk, "parse the written text" );
     Check( strcmp( WriteNew( parsed ), written ) == 0, "the written text reads back the same" );
 
     Check( data.GetRoot() && parsed.GetRoot() && Same( *data.GetRoot(), *parsed.GetRoot() ), "the built and the parsed documents are the same" );
 
-    V3::ObjectView   built   = data.GetRoot() ? data.GetRoot()->AsObject() : V3::ObjectView();
-    V3::ObjectView   weights = built.FindObject( "weights" );
-    const V3::Value* x       = built.Find( "x" );
-    const V3::Value* y       = built.Find( "y" );
-    const V3::Value* large   = weights.Find( "w2" );
-    const V3::Value* below   = weights.Find( "w3" );
+    Json::ObjectView   built   = data.GetRoot() ? data.GetRoot()->AsObject() : Json::ObjectView();
+    Json::ObjectView   weights = built.FindObject( "weights" );
+    const Json::Value* x       = built.Find( "x" );
+    const Json::Value* y       = built.Find( "y" );
+    const Json::Value* large   = weights.Find( "w2" );
+    const Json::Value* below   = weights.Find( "w3" );
 
     Check( x && y && x->AsNumber() && ( *x->AsNumber() == 1.5 ) && !x->IsInteger() && y->IsInteger(), "the members of a structure without a name" );
     Check( large && below && !large->IsInteger() && below->IsInteger(), "a number of 1e21 or more is not an integer" );
 
-    Repeated             repeated;
-    Json::StructuredData old;
-    CheckStatus( old.SerializeFrom( repeated ), Json::Status::kDuplicateName, "2.x refuses a repeated name in a prototype" );
+    Repeated repeated;
     CheckStatus( data.SerializeFrom( repeated ), Json::Status::kDuplicateName, "a repeated name in a prototype" );
     Check( !data.GetRoot(), "a failed build leaves the document empty" );
 }
@@ -272,11 +251,11 @@ struct Custom
     Kind kind = Kind::kLargeObject;
 };
 
-Json::Status Serialize( V3::Node node, const Custom& custom ) noexcept
+Json::Status Serialize( Json::Node node, const Custom& custom ) noexcept
 {
     Json::Status status = node.SetObject();
-    V3::Node     member;
-    V3::Node     element;
+    Json::Node   member;
+    Json::Node   element;
     char         name[ 16 ];
 
     switch ( custom.kind )
@@ -333,7 +312,7 @@ Json::Status Serialize( V3::Node node, const Custom& custom ) noexcept
     return Json::Status::kOk;
 }
 
-Json::Status SerializeCustom( V3::StructuredData& data, Custom::Kind kind )
+Json::Status SerializeCustom( Json::StructuredData& data, Custom::Kind kind )
 {
     Custom custom;
 
@@ -342,10 +321,10 @@ Json::Status SerializeCustom( V3::StructuredData& data, Custom::Kind kind )
     return data.SerializeFrom( custom );
 }
 
-bool HasLargeObject( const V3::StructuredData& data )
+bool HasLargeObject( const Json::StructuredData& data )
 {
-    V3::ObjectView object = data.GetRoot() ? data.GetRoot()->AsObject() : V3::ObjectView();
-    bool           found  = object.GetMemberCount() == 40;
+    Json::ObjectView object = data.GetRoot() ? data.GetRoot()->AsObject() : Json::ObjectView();
+    bool             found  = object.GetMemberCount() == 40;
 
     for ( int a = 0; found && ( a < 40 ); a++ )
     {
@@ -360,7 +339,7 @@ bool HasLargeObject( const V3::StructuredData& data )
 
 void TestRules()
 {
-    V3::StructuredData data;
+    Json::StructuredData data;
 
     CheckStatus( SerializeCustom( data, Custom::Kind::kRepeatedName ), Json::Status::kDuplicateName, "a repeated name in a large object" );
     CheckStatus( SerializeCustom( data, Custom::Kind::kElementInObject ), Json::Status::kInvalidValueType, "an element added to an object" );
@@ -375,7 +354,7 @@ void TestRules()
     CheckStatus( SerializeCustom( data, Custom::Kind::kStatusesIgnored ), Json::Status::kOk, "a large object built with statuses ignored" );
     Check( HasLargeObject( data ), "every member of a large object built with statuses ignored is found" );
 
-    V3::Node empty;
+    Json::Node empty;
     CheckStatus( empty.SetNumber( 1 ), Json::Status::kInvalidValueType, "a node that was never given" );
     Check( empty.GetOpenCount() == 0, "a node that was never given has nothing open" );
 
@@ -403,7 +382,7 @@ void CheckRefusals( const T& data, int64_t leastRequests, const char* descriptio
     int64_t        requests;
 
     {
-        V3::StructuredData document( source );
+        Json::StructuredData document( source );
 
         CheckStatus( document.SerializeFrom( data ), Json::Status::kOk, description );
         expected = WriteNew( document );
@@ -416,7 +395,7 @@ void CheckRefusals( const T& data, int64_t leastRequests, const char* descriptio
     for ( int64_t refused = 0; closed && ( refused < 2 * requests ); refused++ )
     {
         {
-            V3::StructuredData document( source );
+            Json::StructuredData document( source );
 
             source.requestCount = 0;
             source.refusedFirst = refused % requests;

@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <cstdlib>
 
-namespace V3 = Json::V3;
-
 struct Named
 {
     Terathon::String<> s;
@@ -25,7 +23,7 @@ DEFINE_JSON4C4_FUNCTIONS( Point, POINT_PROTO )
 
 // Hands out blocks with malloc, refuses the requests from refusedFirst to refusedLast, and counts the blocks not handed
 // back.
-class CountingSource final : public V3::BlockSource
+class CountingSource final : public Json::BlockSource
 {
 public:
     int64_t requestCount     = 0;
@@ -97,7 +95,7 @@ void TestStringAssignment()
 
     text += "\"}";
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, text ).status, Json::Status::kOk, "parse a long string" );
 
     FailAllocationsAbove( 150 );
@@ -125,7 +123,7 @@ void TestArrayReservation()
 
     text += "2]";
 
-    V3::StructuredData sd;
+    Json::StructuredData sd;
     CheckStatus( ParseText( sd, text ).status, Json::Status::kOk, "parse a long array" );
 
     FailAllocationsAbove( 400 );
@@ -146,8 +144,8 @@ void TestArrayReservation()
 
 void TestSerializeFromFailure()
 {
-    CountingSource     source;
-    V3::StructuredData sd( source );
+    CountingSource       source;
+    Json::StructuredData sd( source );
 
     Point point;
     point.x = 1;
@@ -185,14 +183,14 @@ void TestSerializeFromFailure()
 
 void TestAppendAfterFailure()
 {
-    CountingSource     source;
-    V3::StructuredData sd( source );
+    CountingSource       source;
+    Json::StructuredData sd( source );
     CheckStatus( ParseText( sd, "[1,2,3,4]" ).status, Json::Status::kOk, "parse an array" );
 
-    const V3::Value& root      = *sd.GetRoot();
-    long             failures  = 0;
-    long             successes = 0;
-    bool             unchanged = true;
+    const Json::Value& root      = *sd.GetRoot();
+    long               failures  = 0;
+    long               successes = 0;
+    bool               unchanged = true;
 
     for ( int a = 0; a < 40; a++ )
     {
@@ -219,7 +217,7 @@ void TestAppendAfterFailure()
 
     CheckStatus( sd.Write( "Data/Test/out_test14_append.json" ), Json::Status::kOk, "an array that saw failed appends can be written" );
 
-    V3::StructuredData reparsed;
+    Json::StructuredData reparsed;
     CheckStatus( reparsed.Parse( "Data/Test/out_test14_append.json" ).status, Json::Status::kOk, "reparse the array" );
 }
 
@@ -230,7 +228,7 @@ void TestParseFailures( const char* text, Json::Status expected = Json::Status::
     Terathon::String<> written;
 
     {
-        V3::StructuredData sd( source );
+        Json::StructuredData sd( source );
         CheckStatus( ParseText( sd, text, options ).status, expected, "parse without refusals" );
         written = WriteText( sd );
     }
@@ -241,7 +239,7 @@ void TestParseFailures( const char* text, Json::Status expected = Json::Status::
     for ( int64_t refused = 0; refused < 2 * requests; refused++ )
     {
         {
-            V3::StructuredData sd( source );
+            Json::StructuredData sd( source );
 
             RefuseBlocks( source, refused % requests, ( refused < requests ) ? refused : INT64_MAX );
             Json::ParseResult parseResult = ParseText( sd, text, options );

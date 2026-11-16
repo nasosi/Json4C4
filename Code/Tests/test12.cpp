@@ -1,8 +1,6 @@
 #include "TestAllocation.h"
 #include "TestCheck.h"
 
-namespace V3 = Json::V3;
-
 struct Point
 {
     double x = 0;
@@ -22,39 +20,39 @@ DEFINE_JSON4C4_FUNCTIONS( Repeated, REPEATED_PROTO )
 
 void TestNullRoot()
 {
-    V3::StructuredData sd;
-    Point              point;
+    Json::StructuredData sd;
+    Point                point;
 
     CheckStatus( sd.DeserializeTo( point ), Json::Status::kInvalidStructuredData, "DeserializeTo without a root" );
-    CheckStatus( V3::Validate( sd, point ), Json::Status::kInvalidStructuredData, "Validate without a root" );
+    CheckStatus( Json::Validate( sd, point ), Json::Status::kInvalidStructuredData, "Validate without a root" );
 
     CheckStatus( ParseText( sd, "{\"x\":" ).status, Json::Status::kExpectedJsonValue, "a failed parse" );
     CheckStatus( sd.DeserializeTo( point ), Json::Status::kInvalidStructuredData, "DeserializeTo after a failed parse" );
-    CheckStatus( V3::Validate( sd, point ), Json::Status::kInvalidStructuredData, "Validate after a failed parse" );
+    CheckStatus( Json::Validate( sd, point ), Json::Status::kInvalidStructuredData, "Validate after a failed parse" );
 
-    V3::Value nullValue;
-    V3::Node  nodeNeverGiven;
+    Json::Value nullValue;
+    Json::Node  nodeNeverGiven;
 
     double value = 0;
-    CheckStatus( V3::Deserialize( nullValue, "x", value ), Json::Status::kInvalidValueType, "Deserialize from a null value" );
-    CheckStatus( V3::Validate( nullValue, "x", value ), Json::Status::kInvalidValueType, "Validate a null value" );
+    CheckStatus( Json::Deserialize( nullValue, "x", value ), Json::Status::kInvalidValueType, "Deserialize from a null value" );
+    CheckStatus( Json::Validate( nullValue, "x", value ), Json::Status::kInvalidValueType, "Validate a null value" );
     CheckStatus( sd.AddMember( nullValue, "x", value ), Json::Status::kInvalidValueType, "add a member to a null value" );
 
     Terathon::Array<double> array;
-    CheckStatus( V3::Deserialize( nullValue, array ), Json::Status::kInvalidValueType, "Deserialize an array from a null value" );
-    CheckStatus( V3::Validate( nullValue, array ), Json::Status::kInvalidValueType, "Validate an array against a null value" );
-    CheckStatus( V3::Serialize( nodeNeverGiven, array ), Json::Status::kInvalidValueType, "Serialize an array into a node that was never given" );
+    CheckStatus( Json::Deserialize( nullValue, array ), Json::Status::kInvalidValueType, "Deserialize an array from a null value" );
+    CheckStatus( Json::Validate( nullValue, array ), Json::Status::kInvalidValueType, "Validate an array against a null value" );
+    CheckStatus( Json::Serialize( nodeNeverGiven, array ), Json::Status::kInvalidValueType, "Serialize an array into a node that was never given" );
 
     Json::ObjectMap<double> map;
-    CheckStatus( V3::Deserialize( nullValue, map ), Json::Status::kInvalidValueType, "Deserialize a map from a null value" );
-    CheckStatus( V3::Validate( nullValue, map ), Json::Status::kInvalidValueType, "Validate a map against a null value" );
-    CheckStatus( V3::Serialize( nodeNeverGiven, map ), Json::Status::kInvalidValueType, "Serialize a map into a node that was never given" );
+    CheckStatus( Json::Deserialize( nullValue, map ), Json::Status::kInvalidValueType, "Deserialize a map from a null value" );
+    CheckStatus( Json::Validate( nullValue, map ), Json::Status::kInvalidValueType, "Validate a map against a null value" );
+    CheckStatus( Json::Serialize( nodeNeverGiven, map ), Json::Status::kInvalidValueType, "Serialize a map into a node that was never given" );
 }
 
 void TestFailedParseClearsDocument()
 {
-    V3::StructuredData sd;
-    Point              point;
+    Json::StructuredData sd;
+    Point                point;
 
     CheckStatus( ParseText( sd, "{\"x\":1,\"y\":2} x" ).status, Json::Status::kExpectedEndOfFile, "trailing text" );
     Check( sd.GetRoot() == nullptr, "trailing text leaves no root" );
@@ -80,7 +78,7 @@ void TestFailedParseClearsDocument()
 // A failed SerializeFrom leaves the document empty, and a failed SerializeAt leaves it as it was.
 void TestFailedSerialize()
 {
-    V3::StructuredData sd;
+    Json::StructuredData sd;
 
     Point point;
     point.x = 3;
@@ -111,16 +109,16 @@ void TestSerializeMapOntoObject()
 #endif
 
     {
-        V3::StructuredData sd;
+        Json::StructuredData sd;
 
         CheckStatus( ParseText( sd, "{\"q\":[1,2,3],\"r\":{\"s\":1}}" ).status, Json::Status::kOk, "parse an object" );
         CheckStatus( sd.SerializeAt( *sd.GetRoot(), map ), Json::Status::kOk, "serialize a map onto an object with members" );
         CheckStatus( sd.Write( "Data/Test/out_test12_map.json" ), Json::Status::kOk, "write the replaced object" );
 
-        V3::StructuredData reparsed;
+        Json::StructuredData reparsed;
         CheckStatus( reparsed.Parse( "Data/Test/out_test12_map.json" ).status, Json::Status::kOk, "reparse the replaced object" );
 
-        V3::ObjectView root = reparsed.GetRoot()->AsObject();
+        Json::ObjectView root = reparsed.GetRoot()->AsObject();
         Check( root.GetMemberCount() == 1 && root.FindNumber( "m" ) && *root.FindNumber( "m" ) == 5, "only the map's members are written" );
     }
 

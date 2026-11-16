@@ -1,12 +1,10 @@
-// The 3.0 document: it parses every text as 2.x does and writes the same text, it takes all of its memory from its block
+// The document: it parses every text as 2.3.0 did and writes the same text, it takes all of its memory from its block
 // source and hands all of it back, and lookups and iteration allocate nothing.
 
 #include "TestCheck.h"
 
 #include <cstdint>
 #include <cstdlib>
-
-namespace V3 = Json::V3;
 
 using Terathon::uint32;
 using Terathon::uint64;
@@ -57,7 +55,7 @@ void operator delete[]( void* memory, size_t ) noexcept
 
 // Hands out blocks with malloc, can refuse one request or every block larger than a size, and checks that every block
 // comes back once with its size.
-class CountingSource final : public V3::BlockSource
+class CountingSource final : public Json::BlockSource
 {
 public:
     int64_t requestCount     = 0;
@@ -145,79 +143,56 @@ bool SameText( const Terathon::Array<char>& first, const Terathon::Array<char>& 
 
 int shownMismatches = 0;
 
-// The results of 2.x and of 3.0 for the texts of a group, to check against what 2.3.0 gave.
-ResultHash oldResults;
-ResultHash newResults;
-
-// Adds a result and, for a successful parse, the text written from it.
-void AddResult( ResultHash& results, const Json::ParseResult& result, const Terathon::Array<char>& text )
-{
-    results.Add( result );
-    results.Add( text.begin(), size_t( text.GetArrayElementCount() ) );
-}
+// The results of the parses of a group of texts, to check against what 2.3.0 gave.
+ResultHash results;
 
 void CheckResults( unsigned long long expected, const char* description )
 {
-    CheckHash( oldResults.Take(), expected, description );
-    CheckHash( newResults.Take(), expected, description );
+    CheckHash( results.Take(), expected, description );
 }
 
-// Parses the first length characters of text from an exact-size heap buffer with 2.x and with 3.0, and checks that both
-// give the same status and position, that both write the same text, and that a failed parse keeps no block.
-void CheckSameAs2x( const char* text, size_t length, const char* description, const Json::ParseOptions& options = Json::ParseOptions() )
+// Parses the first length characters of text from an exact-size heap buffer, adds the status, the position and the
+// written text to the results, and checks that a failed parse keeps no block.
+void CheckParse( const char* text, size_t length, const char* description, const Json::ParseOptions& options = Json::ParseOptions() )
 {
     char* exact = static_cast<char*>( malloc( ( length != 0 ) ? length : 1 ) );
     memcpy( exact, text, length );
 
-    Json::StructuredData  oldData;
-    Json::ParseResult     oldResult = oldData.ParseText( exact, length, options );
-    Json::ParseResult     newResult;
-    Terathon::Array<char> oldText;
-    Terathon::Array<char> newText;
-    bool                  same;
-
-    if ( oldResult.status == Json::Status::kOk )
-    {
-        Terathon::Array<char> indentation;
-        oldData.GetRootJsonValue()->Write( oldText, 2, ' ', indentation );
-    }
+    Json::ParseResult     result;
+    Terathon::Array<char> written;
+    bool                  closed;
 
     {
-        V3::StructuredData data( countingSource );
-        newResult = data.ParseText( exact, length, options );
+        Json::StructuredData data( countingSource );
+        result = data.ParseText( exact, length, options );
 
-        same = ( oldResult.status == newResult.status ) && ( oldResult.errorLine == newResult.errorLine ) && ( oldResult.errorColumn == newResult.errorColumn );
-
-        if ( newResult.status == Json::Status::kOk )
+        if ( result.status == Json::Status::kOk )
         {
-            same = same && ( data.Write( newText ) == Json::Status::kOk ) && SameText( oldText, newText );
+            closed = data.Write( written ) == Json::Status::kOk;
         }
         else
         {
-            same = same && ( data.GetRoot() == nullptr ) && ( countingSource.outstandingBytes == 0 );
+            closed = ( data.GetRoot() == nullptr ) && ( countingSource.outstandingBytes == 0 );
         }
     }
 
-    AddResult( oldResults, oldResult, oldText );
-    AddResult( newResults, newResult, newText );
+    results.Add( result );
+    results.Add( written.begin(), size_t( written.GetArrayElementCount() ) );
 
-    same = same && countingSource.AllReturned();
+    closed = closed && countingSource.AllReturned();
 
-    if ( !same && ( shownMismatches++ < 10 ) )
+    if ( !closed && ( shownMismatches++ < 10 ) )
     {
         fprintf( stderr,
-                 "%s, length %u: 2.x status %u at %d:%d, 3.0 status %u at %d:%d\n",
+                 "%s, length %u: status %u at %d:%d\n",
                  description,
                  unsigned( length ),
-                 unsigned( oldResult.status ),
-                 int( oldResult.errorLine ),
-                 int( oldResult.errorColumn ),
-                 unsigned( newResult.status ),
-                 int( newResult.errorLine ),
-                 int( newResult.errorColumn ) );
+                 unsigned( result.status ),
+                 int( result.errorLine ),
+                 int( result.errorColumn ) );
     }
 
-    Check( same, description );
+    Check( closed, description );
 
     free( exact );
 }
@@ -251,7 +226,7 @@ void CheckEveryPrefix( const char* text, size_t length, const char* description 
 {
     for ( size_t a = 0; a <= length; a++ )
     {
-        CheckSameAs2x( text, a, description );
+        CheckParse( text, a, description );
     }
 }
 
@@ -327,7 +302,7 @@ void TestTokensAtTheEnd()
 
             for ( size_t a = 0; a <= strlen( token ); a++ )
             {
-                CheckSameAs2x( text, a, token );
+                CheckParse( text, a, token );
             }
         }
     }
@@ -357,7 +332,7 @@ void TestLongTails()
 
     for ( const Terathon::String<>& text : texts )
     {
-        CheckSameAs2x( text, size_t( text.GetStringLength() ), "a text with a long tail" );
+        CheckParse( text, size_t( text.GetStringLength() ), "a text with a long tail" );
     }
 
     CheckResults( 0x0F83399221C5BC47ULL, "long tails" );
@@ -406,14 +381,14 @@ void TestDuplicateNames()
         for ( int early = 0; early < 2; early++ )
         {
             Terathon::String<> text = MakeRepeatingObject( early != 0 );
-            CheckSameAs2x( text, size_t( text.GetStringLength() ), "repeated names in large objects", options );
+            CheckParse( text, size_t( text.GetStringLength() ), "repeated names in large objects", options );
         }
 
         const char* small  = "{\"a\":1,\"b\":2,\"a\":3}";
         const char* nested = "[{\"a\":1,\"a\":{\"b\":1,\"b\":2}}]";
 
-        CheckSameAs2x( small, strlen( small ), "repeated names in a small object", options );
-        CheckSameAs2x( nested, strlen( nested ), "repeated names in nested small objects", options );
+        CheckParse( small, strlen( small ), "repeated names in a small object", options );
+        CheckParse( nested, strlen( nested ), "repeated names in nested small objects", options );
 
         // 300 names from 0 to 99, so that every name repeats, with large and small objects inside.
         Terathon::String<> many = "{";
@@ -426,7 +401,7 @@ void TestDuplicateNames()
         }
 
         many += "}";
-        CheckSameAs2x( many, size_t( many.GetStringLength() ), "many repeated names", options );
+        CheckParse( many, size_t( many.GetStringLength() ), "many repeated names", options );
     }
 
     CheckResults( 0x2F337869320B5276ULL, "repeated names" );
@@ -441,15 +416,15 @@ void TestLimits()
         Json::ParseOptions options;
 
         options.maxValueCount = a;
-        CheckSameAs2x( text, strlen( text ), "a value limit", options );
+        CheckParse( text, strlen( text ), "a value limit", options );
 
         options                    = Json::ParseOptions();
         options.maxStringByteCount = a;
-        CheckSameAs2x( text, strlen( text ), "a string byte limit", options );
+        CheckParse( text, strlen( text ), "a string byte limit", options );
 
         options                 = Json::ParseOptions();
         options.maxNestingDepth = a;
-        CheckSameAs2x( text, strlen( text ), "a nesting limit", options );
+        CheckParse( text, strlen( text ), "a nesting limit", options );
     }
 
     CheckResults( 0x03E37EF618816082ULL, "limits" );
@@ -458,13 +433,13 @@ void TestLimits()
 // Strings and names may hold zeros, written as \u0000. A zero byte in the text is still refused.
 void TestZeros()
 {
-    const char         text[] = "{\"s\":\"a\\u0000b\",\"a\\u0000b\":1,\"a\\u0000c\":2,\"a\":3}";
-    V3::StructuredData data( countingSource );
+    const char           text[] = "{\"s\":\"a\\u0000b\",\"a\\u0000b\":1,\"a\\u0000c\":2,\"a\":3}";
+    Json::StructuredData data( countingSource );
 
     CheckStatus( data.ParseText( text, sizeof( text ) - 1 ).status, Json::Status::kOk, "parse strings and names with zeros" );
 
-    V3::ObjectView object = data.GetRoot() ? data.GetRoot()->AsObject() : V3::ObjectView();
-    V3::StringView string = object.FindString( "s" );
+    Json::ObjectView object = data.GetRoot() ? data.GetRoot()->AsObject() : Json::ObjectView();
+    Json::StringView string = object.FindString( "s" );
 
     Check( ( string.GetLength() == 3 ) && ( string.GetText()[ 1 ] == 0 ) && ( string.GetText()[ 2 ] == 'b' ), "a string keeps its zero" );
     Check( ( object.GetMemberCount() == 4 ) && object.FindNumber( "a" ) && ( *object.FindNumber( "a" ) == 3 ), "names differing after a zero are distinct" );
@@ -499,7 +474,7 @@ void TestZeros()
                  "a repeated name with a zero in a large object" );
     CheckStatus( data.ParseText( distinct, uint64( distinct.GetStringLength() ) ).status, Json::Status::kOk, "a large object of names with zeros" );
 
-    object = data.GetRoot() ? data.GetRoot()->AsObject() : V3::ObjectView();
+    object = data.GetRoot() ? data.GetRoot()->AsObject() : Json::ObjectView();
     Check( object.Find( "k\0"
                         "39",
                         4 ) &&
@@ -523,11 +498,11 @@ void TestViews()
 
     text += "}";
 
-    V3::StructuredData data( countingSource );
+    Json::StructuredData data( countingSource );
     CheckStatus( data.ParseText( text, uint64( text.GetStringLength() ) ).status, Json::Status::kOk, "parse a document for the views" );
 
-    const V3::Value* root   = data.GetRoot();
-    V3::ObjectView   object = root ? root->AsObject() : V3::ObjectView();
+    const Json::Value* root   = data.GetRoot();
+    Json::ObjectView   object = root ? root->AsObject() : Json::ObjectView();
 
     Check( object && ( object.GetMemberCount() == 102 ) && !root->AsArray() && !root->AsString() && !root->AsNumber(), "the root is an object" );
 
@@ -547,10 +522,10 @@ void TestViews()
     Check( !object.FindString( "k1" ) && !object.FindArray( "k1" ) && !object.FindObject( "list" ) && !object.FindBool( "k1" ) && !object.FindNull( "k1" ),
            "a value of another type is not found" );
 
-    V3::StringView empty = object.FindString( "empty" );
+    Json::StringView empty = object.FindString( "empty" );
     Check( empty && ( empty.GetLength() == 0 ) && ( empty == "" ) && ( empty != "x" ), "an empty string is present" );
 
-    V3::ArrayView list = object.FindArray( "list" );
+    Json::ArrayView list = object.FindArray( "list" );
     Check( list && ( list.GetElementCount() == 6 ) && ( *list[ 0 ].AsNumber() == 1 ) && ( list[ 1 ].AsString() == "two" ) && *list[ 2 ].AsBool() &&
                list[ 3 ].IsNull() && list[ 4 ].AsArray() && ( list[ 4 ].AsArray().GetElementCount() == 0 ) && list[ 5 ].AsObject() &&
                ( list[ 5 ].AsObject().GetMemberCount() == 0 ),
@@ -558,9 +533,9 @@ void TestViews()
 
     int count = 0;
 
-    for ( const V3::Value& element : list )
+    for ( const Json::Value& element : list )
     {
-        count += ( element.GetType() == V3::Type::kNull ) ? 10 : 1;
+        count += ( element.GetType() == Json::Type::kNull ) ? 10 : 1;
     }
 
     Check( count == 15, "iterate over an array" );
@@ -578,8 +553,9 @@ void TestViews()
     }
 
     Check( integers, "numbers written without a fraction or an exponent are integers" );
-    Check( !V3::ArrayView() && ( V3::ArrayView().GetElementCount() == 0 ) && !V3::ObjectView().Find( "a" ) && !V3::StringView(), "empty views" );
-    Check( ( V3::StringView( "ab", 2 ) == V3::StringView( "abc", 2 ) ) && ( V3::StringView( "ab", 2 ) != "abc" ) && ( V3::StringView( "ab", 2 ) != "a" ),
+    Check( !Json::ArrayView() && ( Json::ArrayView().GetElementCount() == 0 ) && !Json::ObjectView().Find( "a" ) && !Json::StringView(), "empty views" );
+    Check( ( Json::StringView( "ab", 2 ) == Json::StringView( "abc", 2 ) ) && ( Json::StringView( "ab", 2 ) != "abc" ) &&
+               ( Json::StringView( "ab", 2 ) != "a" ),
            "compare strings" );
 }
 
@@ -589,7 +565,7 @@ void TestNoOtherAllocations()
     Terathon::String<> text;
     Check( ReadTextFile( "Data/Test/jsonchecker/pass1.json", text ), "read pass1.json" );
 
-    V3::StructuredData data( countingSource );
+    Json::StructuredData data( countingSource );
 
     countingAllocations = true;
     allocationCount     = 0;
@@ -599,11 +575,11 @@ void TestNoOtherAllocations()
     int64_t requests = countingSource.requestCount;
     int     visited  = 0;
 
-    const V3::Value* root = data.GetRoot();
+    const Json::Value* root = data.GetRoot();
 
-    for ( const V3::Value& element : root ? root->AsArray() : V3::ArrayView() )
+    for ( const Json::Value& element : root ? root->AsArray() : Json::ArrayView() )
     {
-        for ( const V3::Member& member : element.AsObject() )
+        for ( const Json::Member& member : element.AsObject() )
         {
             visited += element.AsObject().Find( member.GetName() ) ? 1 : 0;
         }
@@ -650,7 +626,7 @@ void TestRefusedBlocks()
     Terathon::Array<char> expected;
 
     {
-        V3::StructuredData data( countingSource );
+        Json::StructuredData data( countingSource );
 
         countingSource.requestCount = 0;
         CheckStatus( data.ParseText( text, uint64( text.GetStringLength() ) ).status, Json::Status::kOk, "parse a document of several blocks" );
@@ -674,7 +650,7 @@ void TestRefusedBlocks()
         Json::Status status;
 
         {
-            V3::StructuredData data( countingSource );
+            Json::StructuredData data( countingSource );
 
             countingSource.requestCount   = 0;
             countingSource.refusedRequest = refused;
@@ -726,7 +702,7 @@ void TestRefusedBlocks()
     countingSource.largestGranted   = 0;
 
     {
-        V3::StructuredData data( countingSource );
+        Json::StructuredData data( countingSource );
 
         CheckStatus( data.ParseText( arrays, uint64( arrays.GetStringLength() ) ).status, Json::Status::kOk, "parse into small blocks" );
         Check( ( countingSource.largestGranted <= 16384 ) && data.GetRoot() && ( data.GetRoot()->AsArray().GetElementCount() == 300 ) &&
@@ -741,7 +717,7 @@ void TestRefusedBlocks()
     Check( countingSource.AllReturned(), "small blocks are all handed back" );
 
     {
-        V3::StructuredData data( countingSource );
+        Json::StructuredData data( countingSource );
         CheckStatus( data.ParseText( text, uint64( text.GetStringLength() ) ).status, Json::Status::kOk, "parse again" );
     }
 
@@ -751,8 +727,8 @@ void TestRefusedBlocks()
 void TestFiles()
 {
     {
-        V3::StructuredData data( countingSource );
-        V3::StructuredData reread( countingSource );
+        Json::StructuredData data( countingSource );
+        Json::StructuredData reread( countingSource );
 
         CheckStatus( data.Parse( "Data/Examples/car.json" ).status, Json::Status::kOk, "parse a file" );
         CheckStatus( data.Write( "test21_car.json", 4, ' ' ), Json::Status::kOk, "write a file" );

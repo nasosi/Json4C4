@@ -31,7 +31,6 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
-namespace V3   = Json::V3;
 namespace TS   = Terathon;
 
 // Example 05: Simple parsing and manual json structure query.
@@ -42,8 +41,8 @@ int main()
     printf( "Example05 : Simple parsing and manual JSON structure query.\n" );
 
     // Parse the file and check for parsing errors.
-    V3::StructuredData jsonStructuredData;
-    auto               parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
+    Json::StructuredData jsonStructuredData;
+    auto                 parseResult = jsonStructuredData.Parse( "Data/Examples/simple.json" );
 
     if ( parseResult.status != Json::Status::kOk )
     {
@@ -55,10 +54,10 @@ int main()
     }
 
     // Get the root json value
-    const V3::Value* root = jsonStructuredData.GetRoot();
+    const Json::Value* root = jsonStructuredData.GetRoot();
 
     // View it as an object, which is essentially a map.
-    V3::ObjectView object = root->AsObject();
+    Json::ObjectView object = root->AsObject();
     if ( !object )
     {
         fprintf( stderr, "Error: expected an object as the root of the parsed data structure.\n" );

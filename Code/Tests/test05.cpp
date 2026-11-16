@@ -3,7 +3,6 @@
 #include <cstdio>
 
 namespace Json = C4::Json;
-namespace V3   = Json::V3;
 
 #ifdef JSON4C4_ENABLE_STD_SUPPORT_INTERNAL
 
@@ -18,7 +17,7 @@ DEFINE_JSON4C4_FUNCTIONS( MapExample, PROTO )
 
 int main()
 {
-    V3::StructuredData jSd;
+    Json::StructuredData jSd;
 
     auto parseResult = jSd.Parse( "Data/Test/test_file04.json" );
 
@@ -33,7 +32,7 @@ int main()
 
     MapExample object;
 
-    if ( V3::Validate( jSd, object ) != Json::Status::kOk )
+    if ( Json::Validate( jSd, object ) != Json::Status::kOk )
     {
         fprintf( stderr, "Error validating JSON structured data." );
         return 1;
