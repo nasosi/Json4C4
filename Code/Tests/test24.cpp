@@ -1,6 +1,6 @@
-// Editing a document: members and elements added and removed in place, values replaced, copies between documents,
-// objects that grow past 16 members and shrink back, edits refused or failed leaving the document as it was, and handles
-// that fail closed once the document has changed.
+// Editing a document: members and elements added and removed in place, values replaced, copies within and between
+// documents, a document replaced by one of its own values, objects that grow past 16 members and shrink back, edits
+// refused or failed leaving the document as it was, and handles that fail closed once the document has changed.
 
 #include "TestCheck.h"
 
@@ -41,6 +41,43 @@ public:
         outstandingCount--;
         free( block );
     }
+};
+
+// Hands out blocks with malloc and fills each block handed back with 0xDD, keeping it until the source goes, so that a
+// read of a block the document has handed back reads the fill instead of what the block held.
+class PoisoningSource final : public Json::BlockSource
+{
+public:
+    int outstandingCount = 0;
+
+    ~PoisoningSource()
+    {
+        while ( handedBack )
+        {
+            void* next = *static_cast<void**>( handedBack );
+            free( handedBack );
+            handedBack = next;
+        }
+    }
+
+    void* AllocateBlock( Terathon::uint64 size ) noexcept override
+    {
+        outstandingCount++;
+
+        return malloc( size_t( size ) );
+    }
+
+    void FreeBlock( void* block, Terathon::uint64 size ) noexcept override
+    {
+        outstandingCount--;
+        memset( block, 0xDD, size_t( size ) );
+
+        *static_cast<void**>( block ) = handedBack;
+        handedBack                    = block;
+    }
+
+private:
+    void* handedBack = nullptr;
 };
 
 String<> WriteNew( const Json::StructuredData& data )
@@ -103,6 +140,16 @@ void TestMembers()
     CheckStatus( data.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
     CheckStatus( data.AddMember( root, "z", 5.0 ), Json::Status::kOk, "add a member" );
     CheckStatus( data.AddMember( root, "z", 6.0 ), Json::Status::kDuplicateName, "a repeated name is refused" );
+
+    const char* none = nullptr;
+
+    CheckStatus( data.AddMember( root, none, 0, 6.0 ), Json::Status::kNameNotPresent, "a null name of length 0 is refused" );
+    CheckStatus( data.AddMember( root, none, 6.0 ), Json::Status::kNameNotPresent, "a null name is refused" );
+    CheckStatus( data.RemoveMember( root, none ), Json::Status::kNameNotPresent, "a removal by a null name is refused" );
+
+    double read = 0;
+    CheckStatus( Json::Deserialize( *root.Get(), none, read ), Json::Status::kNameNotPresent, "a read by a null name finds nothing" );
+    CheckStatus( Json::Validate( *root.Get(), none, read ), Json::Status::kNameNotPresent, "a check by a null name finds nothing" );
     Check( Holds( data, "{ \"a\": 1, \"c\": 3, \"z\": 5 }" ), "members removed and added in order" );
     Check( object.FindNumber( "z" ) && ( *object.FindNumber( "z" ) == 5 ), "a view of the edited object stays valid" );
 
@@ -115,6 +162,7 @@ void TestMembers()
 
     CheckStatus( data.SerializeAt( root, map ), Json::Status::kOk, "serialize a map onto an object" );
     Check( Holds( data, "{ \"m\": 5 }" ), "only the map's members are left" );
+    Check( object.FindNumber( "m" ) && ( *object.FindNumber( "m" ) == 5 ), "a view of an object replaced by an object stays valid" );
 
     CheckStatus( data.SerializeAt( root, Json::ObjectMap<double>() ), Json::Status::kOk, "serialize an empty map onto an object" );
     Check( Holds( data, "{}" ), "an empty map empties the object" );
@@ -329,6 +377,34 @@ void TestSelfCopies()
            "the copies" );
 }
 
+// A document replaced by one of its own values, or by a parse of one of its strings, reads it before it hands back the
+// blocks that hold it.
+void TestOwnValues()
+{
+    PoisoningSource source;
+
+    {
+        Json::StructuredData data( source );
+
+        CheckStatus( Parse( data, "{ \"keep\": { \"name\": \"a string\", \"list\": [ 1, 2, 3 ] }, \"other\": 2 }" ), Json::Status::kOk, "parse a document" );
+        CheckStatus( data.SerializeFrom( *data.GetRoot()->AsObject().Find( "keep" ) ), Json::Status::kOk, "serialize a value of the document onto it" );
+        Check( Holds( data, "{ \"name\": \"a string\", \"list\": [ 1, 2, 3 ] }" ), "the document holds its former value" );
+
+        CheckStatus( Parse( data, "{ \"text\": \"[ 1, \\\"two\\\" ]\" }" ), Json::Status::kOk, "parse a document that holds a text" );
+
+        Json::StringView text = data.GetRoot()->AsObject().FindString( "text" );
+
+        CheckStatus( data.ParseText( text.GetText(), text.GetLength() ).status, Json::Status::kOk, "parse a string of the document" );
+        Check( Holds( data, "[ 1, \"two\" ]" ), "the document holds the parsed string" );
+
+        CheckStatus( Parse( data, "{ \"file\": \"Data/Examples/simple.json\\u0000\" }" ), Json::Status::kOk, "parse a document that holds a file name" );
+        CheckStatus( data.Parse( data.GetRoot()->AsObject().FindString( "file" ).GetText() ).status, Json::Status::kOk, "parse a file named in the document" );
+        Check( Holds( data, "{ \"text\": \"Color\", \"width\": 5, \"height\": 10 }" ), "the document holds the file" );
+    }
+
+    Check( source.outstandingCount == 0, "every block of a document replaced by its own values comes back" );
+}
+
 void TestOtherDocuments()
 {
     Json::StructuredData from;
@@ -537,6 +613,7 @@ int main()
     TestEmptyContainers();
     TestCrossingSixteen();
     TestSelfCopies();
+    TestOwnValues();
     TestOtherDocuments();
     TestEditsDuringBuild();
     TestHandles();

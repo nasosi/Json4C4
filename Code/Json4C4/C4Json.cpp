@@ -88,7 +88,7 @@
 
 #define JSON4C4VERSIONMAJOR 3
 #define JSON4C4VERSIONMINOR 0
-#define JSON4C4VERSIONPATCH 0
+#define JSON4C4VERSIONPATCH 1
 
 #define STRN( s ) #s
 #define STR( s ) STRN( s )
@@ -660,24 +660,24 @@ namespace C4
             }
         }
 
-        Status AppendText( Array<char>& output, const char* text, int32 length )
+        Status AppendText( Array<char>& output, const char* text, uint32 length )
         {
             int32 count = output.GetArrayElementCount();
 
-            if ( length > JSON4C4_MAX_FILE_SIZE - count )
+            if ( uint64( count ) + length > JSON4C4_MAX_FILE_SIZE )
             {
                 return Status::kFileTooLarge;
             }
 
-            output.SetArrayElementCount( count + length );
-            CopyText( output.begin() + count, text, length );
+            output.SetArrayElementCount( count + int32( length ) );
+            CopyText( output.begin() + count, text, int32( length ) );
 
             return Status::kOk;
         }
 
         Status AppendText( Array<char>& output, const char* text )
         {
-            return AppendText( output, text, Text::GetTextLength( text ) );
+            return AppendText( output, text, uint32( Text::GetTextLength( text ) ) );
         }
 
         // The length of the character at byte when a string literal holds it unescaped, or 0 when it has to be escaped or is
@@ -699,7 +699,7 @@ namespace C4
         // A character that may run into the end of the text is read from a copy followed by zeros.
         inline int32 GetPlainCharLength( const uint8* byte, const uint8* end ) noexcept
         {
-            if ( end - byte >= 4 )
+            if ( ( end - byte >= 4 ) || ( ( byte != end ) && ( byte[ 0 ] < 0x80U ) ) )
             {
                 return GetPlainCharLength( byte );
             }
@@ -739,7 +739,7 @@ namespace C4
                     byte += charLength;
                 }
 
-                status = AppendText( output, reinterpret_cast<const char*>( run ), int32( byte - run ) );
+                status = AppendText( output, reinterpret_cast<const char*>( run ), uint32( byte - run ) );
 
                 if ( ( status != Status::kOk ) || ( byte == end ) )
                 {
@@ -1524,23 +1524,54 @@ namespace C4
         // A Serialize that clears the document it is building leaves it as it is, so that the build keeps its blocks.
         void StructuredData::Clear() noexcept
         {
-            if ( builder )
+            if ( !builder )
             {
-                return;
+                FreeBlocks( TakeBlocks() );
             }
+        }
 
-            while ( blocks )
-            {
-                Block* next = blocks->next;
-                blockSource->FreeBlock( blocks, blocks->size );
-                blocks = next;
-            }
+        // Empties the document and gives its blocks to the caller, to free once nothing reads them.
+        StructuredData::Block* StructuredData::TakeBlocks() noexcept
+        {
+            Block* taken = blocks;
 
+            blocks        = nullptr;
             blockTop      = nullptr;
             blockEnd      = nullptr;
             nextBlockSize = smallestBlockSize;
             root          = nullptr;
             editCount++;
+
+            return taken;
+        }
+
+        void StructuredData::FreeBlocks( Block* block ) noexcept
+        {
+            while ( block )
+            {
+                Block* next = block->next;
+                blockSource->FreeBlock( block, block->size );
+                block = next;
+            }
+        }
+
+        // Whether an address lies in one of the document's blocks.
+        bool StructuredData::Owns( const void* address ) const noexcept
+        {
+            machine_address at = reinterpret_cast<machine_address>( address );
+
+            for ( const Block* block = blocks; block; block = block->next )
+            {
+                machine_address start = reinterpret_cast<machine_address>( block + 1 );
+                machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
+
+                if ( ( at >= start ) && ( at < end ) )
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         // Sizes are multiples of 8, and values, arrays and members are taken from the bottom of the free space of the
@@ -1733,6 +1764,11 @@ namespace C4
             uint64 GetSize() const noexcept
             {
                 return stack.GetSize();
+            }
+
+            void SetSize( uint64 size ) noexcept
+            {
+                stack.SetSize( size );
             }
 
             uint32 GetMemberCount( uint64 base ) const noexcept
@@ -2295,6 +2331,7 @@ namespace C4
             }
         };
 
+        // A text in the document's own blocks, such as one of its strings, is parsed before they are handed back.
         ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
         {
             if ( builder )
@@ -2302,6 +2339,16 @@ namespace C4
                 return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
 
+            Block*      replaced = Owns( text ) ? TakeBlocks() : nullptr;
+            ParseResult result   = ClearAndParse( text, length, options );
+
+            FreeBlocks( replaced );
+
+            return result;
+        }
+
+        ParseResult StructuredData::ClearAndParse( const char* text, uint64 length, const ParseOptions& options ) noexcept
+        {
             Clear();
 
             if ( ( text == nullptr ) || ( length == 0 ) )
@@ -2367,15 +2414,14 @@ namespace C4
             return ParseText( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
         }
 
-        // The text of a file is read into a block from the block source, handed back when the parse ends.
+        // The file is opened before the document is cleared, so that its name may be a string of the document. Its text
+        // is read into a block from the block source, handed back when the parse ends.
         ParseResult StructuredData::Parse( const char* fileName, const ParseOptions& options ) noexcept
         {
             if ( builder )
             {
                 return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
-
-            Clear();
 
             File       file;
             FileStatus fileStatus = kFileOpenFailed;
@@ -2386,6 +2432,8 @@ namespace C4
                     fileStatus = file.OpenFile( fileName, kFileReadOnly );
                     return Status::kOk;
                 } );
+
+            Clear();
 
             if ( fileStatus != kFileOkay )
             {
@@ -2443,14 +2491,11 @@ namespace C4
         class Writer
         {
         public:
-            Writer( Array<char>& outputText, uint32 indentation, char indentationCharacter ) noexcept :
-                output( outputText ),
-                indentationLength( indentation ),
-                indentationChar( indentationCharacter )
+            Writer( uint32 indentation, char indentationCharacter ) noexcept : indentationLength( indentation ), indentationChar( indentationCharacter )
             {
             }
 
-            Status Write( const Value& value, uint32 depth )
+            Status Write( Array<char>& output, const Value& value, uint32 depth )
             {
                 switch ( value.GetType() )
                 {
@@ -2461,7 +2506,7 @@ namespace C4
                         return AppendText( output, *value.AsBool() ? "true" : "false" );
 
                     case Type::kNumber:
-                        return WriteNumber( *value.AsNumber(), value.IsFloat() );
+                        return WriteNumber( output, *value.AsNumber(), value.IsFloat() );
 
                     case Type::kString:
                     {
@@ -2470,28 +2515,27 @@ namespace C4
                     }
 
                     case Type::kArray:
-                        return WriteArray( value.AsArray(), depth );
+                        return WriteArray( output, value.AsArray(), depth );
 
                     case Type::kObject:
-                        return WriteObject( value.AsObject(), depth );
+                        return WriteObject( output, value.AsObject(), depth );
                 }
 
                 return Status::kInvalidValueType;
             }
 
         private:
-            Array<char>& output;
-            uint32       indentationLength;
-            char         indentationChar;
+            uint32 indentationLength;
+            char   indentationChar;
 
-            Status Indent( uint32 depth )
+            Status Indent( Array<char>& output, uint32 depth )
             {
                 uint64 length = uint64( depth ) * indentationLength;
 
                 return ( length > JSON4C4_MAX_FILE_SIZE ) ? Status::kFileTooLarge : ExpandArray( output, indentationChar, uint32( length ) );
             }
 
-            Status WriteNumber( double number, bool single )
+            Status WriteNumber( Array<char>& output, double number, bool single )
             {
                 if ( !( number >= -maxDouble && number <= maxDouble ) )
                 {
@@ -2503,18 +2547,18 @@ namespace C4
                 return AppendText( output, text, single ? WriteFloat( float( number ), text ) : ntt_write_f64( number, text ) );
             }
 
-            Status WriteArray( const ArrayView& array, uint32 depth )
+            Status WriteArray( Array<char>& output, const ArrayView& array, uint32 depth )
             {
                 uint32 count  = array.GetElementCount();
                 Status status = AppendText( output, "[\n" );
 
                 for ( uint32 a = 0; ( status == Status::kOk ) && ( a != count ); a++ )
                 {
-                    status = Indent( depth + 1 );
+                    status = Indent( output, depth + 1 );
 
                     if ( status == Status::kOk )
                     {
-                        status = Write( array[ a ], depth + 1 );
+                        status = Write( output, array[ a ], depth + 1 );
                     }
 
                     if ( status == Status::kOk )
@@ -2525,13 +2569,13 @@ namespace C4
 
                 if ( status == Status::kOk )
                 {
-                    status = Indent( depth );
+                    status = Indent( output, depth );
                 }
 
                 return ( status == Status::kOk ) ? AppendText( output, "]", 1 ) : status;
             }
 
-            Status WriteObject( const ObjectView& object, uint32 depth )
+            Status WriteObject( Array<char>& output, const ObjectView& object, uint32 depth )
             {
                 uint32 count  = object.GetMemberCount();
                 Status status = AppendText( output, "{\n" );
@@ -2540,7 +2584,7 @@ namespace C4
                 {
                     const Member& member = object.begin()[ a ];
 
-                    status = Indent( depth + 1 );
+                    status = Indent( output, depth + 1 );
 
                     if ( status == Status::kOk )
                     {
@@ -2554,7 +2598,7 @@ namespace C4
 
                     if ( status == Status::kOk )
                     {
-                        status = Write( member.GetValue(), depth + 1 );
+                        status = Write( output, member.GetValue(), depth + 1 );
                     }
 
                     if ( status == Status::kOk )
@@ -2565,7 +2609,7 @@ namespace C4
 
                 if ( status == Status::kOk )
                 {
-                    status = Indent( depth );
+                    status = Indent( output, depth );
                 }
 
                 return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
@@ -2582,8 +2626,8 @@ namespace C4
             return Detail::MayThrow(
                 [ & ]()
                 {
-                    Writer writer( output, indentationLength, indentationChar );
-                    return writer.Write( *root, 0 );
+                    Writer writer( indentationLength, indentationChar );
+                    return writer.Write( output, *root, 0 );
                 } );
         }
 
@@ -2604,7 +2648,7 @@ namespace C4
                 return Status::kInvalidValueType;
             }
 
-            return Detail::HoldsZero( string ) ? Status::kStringHoldsZero : Status::kOk;
+            return Detail::CheckStringCopy( string );
         }
 
         Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept
@@ -2959,12 +3003,17 @@ namespace C4
                 uint64 base;
             };
 
-            StructuredData& document;
-            PendingValues   children;
-            ScratchStack    open;
-            Status          failure = Status::kOk;
+            StructuredData&        document;
+            PendingValues          children;
+            ScratchStack           open;
+            Status                 failure = Status::kOk;
+            StructuredData::Block* replacedBlocks;
 
-            explicit Builder( StructuredData& data ) noexcept : document( data ), children( data ), open( *data.blockSource )
+            Builder( StructuredData& data, StructuredData::Block* replaced ) noexcept :
+                document( data ),
+                children( data ),
+                open( *data.blockSource ),
+                replacedBlocks( replaced )
             {
             }
 
@@ -3109,6 +3158,11 @@ namespace C4
                     return Status::kInvalidValueType;
                 }
 
+                if ( !name )
+                {
+                    return Status::kNameNotPresent;
+                }
+
                 const char* copy;
                 Status      status = CopyText( name, length, copy );
 
@@ -3135,6 +3189,8 @@ namespace C4
                 return Status::kOk;
             }
 
+            // An array or object that fails to close leaves nothing it held on the stack, so that a Serialize that goes
+            // on adds to the one around it.
             Status CloseSince( uint32 openCount ) noexcept
             {
                 while ( GetOpenCount() > openCount )
@@ -3156,6 +3212,7 @@ namespace C4
 
                     if ( status != Status::kOk )
                     {
+                        children.SetSize( container.base );
                         return status;
                     }
 
@@ -3353,21 +3410,13 @@ namespace C4
         // A value in none of this document's blocks, such as a value of another document, gives an empty handle.
         EditHandle StructuredData::Edit( const Value& value ) noexcept
         {
-            EditHandle      handle;
-            machine_address address = reinterpret_cast<machine_address>( &value );
+            EditHandle handle;
 
-            for ( const Block* block = blocks; block; block = block->next )
+            if ( Owns( &value ) )
             {
-                machine_address start = reinterpret_cast<machine_address>( block + 1 );
-                machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
-
-                if ( ( address >= start ) && ( address < end ) )
-                {
-                    handle.document = this;
-                    handle.value    = &value;
-                    handle.edit     = editCount;
-                    break;
-                }
+                handle.document = this;
+                handle.value    = &value;
+                handle.edit     = editCount;
             }
 
             return handle;
@@ -3397,7 +3446,8 @@ namespace C4
             return ( ( status == Status::kOk ) && ( handle.value->type != type ) ) ? Status::kInvalidValueType : status;
         }
 
-        // The builder lives in a block of its own, handed back when the build ends.
+        // The builder lives in a block of its own, handed back when the build ends, and a SerializeFrom keeps the
+        // blocks of the document it replaces until then, so that the document may be built from its own values.
         Status StructuredData::BeginBuild( const Change& change, Node& rootNode ) noexcept
         {
             Status status = builder ? Status::kBuildInProgress : Status::kOk;
@@ -3417,6 +3467,7 @@ namespace C4
 
                 case ChangeKind::kAddMember:
                     status = CheckEdit( *change.handle, Type::kObject );
+                    status = ( ( status == Status::kOk ) && !change.name ) ? Status::kNameNotPresent : status;
                     status =
                         ( ( status == Status::kOk ) && change.handle->value->AsObject().Find( change.name, change.length ) ) ? Status::kDuplicateName : status;
                     break;
@@ -3427,19 +3478,16 @@ namespace C4
                 return status;
             }
 
-            if ( change.kind == ChangeKind::kDocument )
-            {
-                Clear();
-            }
-
-            void* memory = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
+            Block* replaced = ( change.kind == ChangeKind::kDocument ) ? TakeBlocks() : nullptr;
+            void*  memory   = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
 
             if ( !memory )
             {
+                FreeBlocks( replaced );
                 return Status::kAllocationRefused;
             }
 
-            builder          = new ( memory ) Builder( *this );
+            builder          = new ( memory ) Builder( *this, replaced );
             rootNode.builder = builder;
             rootNode.offset  = 0;
 
@@ -3455,14 +3503,17 @@ namespace C4
                 return status;
             }
 
-            status      = ( status == Status::kOk ) ? builder->failure : status;
-            Value built = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
+            status          = ( status == Status::kOk ) ? builder->failure : status;
+            Value  built    = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
+            Block* replaced = builder->replacedBlocks;
 
             builder->~Builder();
             blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
             builder = nullptr;
 
             status = ( status == Status::kOk ) ? Splice( change, built ) : status;
+
+            FreeBlocks( replaced );
 
             if ( ( status != Status::kOk ) && ( change.kind == ChangeKind::kDocument ) )
             {

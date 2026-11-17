@@ -78,7 +78,7 @@ if ( jsonStructuredData.DeserializeTo( textBox ) != Json::Status::kOk )
 printf( "TextBox text: %s. Width: %f, height: %f\n",
         static_cast< const char* >( textBox.text ), textBox.width, textBox.height );
 ```
-If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
+If the ```DeserializeTo``` call is not successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
 ### Reading in one call
 ```Json::Read``` parses a file, or a text in memory, and deserializes it in one call. When it fails, the ```Json::ReadResult``` it returns tells where: a syntax error gives its line and column, and a value that does not fit the structure gives its path, such as ```boxes[2].width```, and its line and column. A member that is missing gives the line and column of the object that should hold it.
@@ -149,12 +149,12 @@ for ( const Json::Member& member : box )
 * An ```ArrayView``` gives its elements with ```[ index ]``` and in a range-based ```for```, and ```GetElementCount()``` counts them.
 * A ```StringView``` is a pointer and a length, without a terminating zero. A string may hold zeros, written ```\u0000``` in JSON. A ```std::string``` keeps them, while a ```String<>```, or a name in an ```ObjectMap```, cannot hold them, and validating or deserializing one fails with ```Status::kStringHoldsZero```.
 
-A document keeps everything it holds in a few large blocks, which it takes from a ```Json::BlockSource``` and hands back when it is cleared with ```Clear()```, parsed again or destroyed. Values, strings and views taken from a document are valid until then, and finding or iterating allocates nothing. A value takes 16 bytes and an object member 32, so a document of small numbers, such as ```[1,1,1]```, takes about 8 times the size of its text.
+A document keeps everything it holds in a few large blocks, which it takes from a ```Json::BlockSource``` and hands back when it is cleared with ```Clear()```, parsed again, replaced by ```SerializeFrom``` or destroyed. Values, strings and views taken from a document are valid until then, and finding or iterating allocates nothing. A value takes 16 bytes and an object member 32, so the values of a long array of small numbers, such as ```[1,1,1,...]```, take 8 times the size of its text, and the document takes about 10 times.
 
-The default block source uses ```operator new```. A source of your own is given to the constructor and must outlive the document. It may refuse a block by returning ```nullptr```, and the parse or edit then fails with ```Status::kAllocationRefused```: a parse leaves the document empty, and an edit leaves it as it was.
+The default block source uses ```operator new```. A source of your own is given to the constructor and must outlive the document. It may refuse a block by returning ```nullptr```. A block the document only wanted for growth is then asked for again at smaller sizes, and when a block it needs is refused, the parse or edit fails with ```Status::kAllocationRefused```: a parse leaves the document empty, and an edit leaves it as it was.
 
 ## Writing, serializing and editing
-```Write``` writes a whole document into a file or an ```Array<char>```, indented by two spaces unless told otherwise:
+```Write``` writes a whole document into a file, or at the end of an ```Array<char>```, indented by two spaces unless told otherwise:
 ```cxx
 jsonStructuredData.Write( "Data/Examples/simpleRewrite.json" );
 jsonStructuredData.Write( "Data/Examples/simpleTabs.json", 1, '\t' );
@@ -175,7 +175,7 @@ A document can also be edited in place. An edit is given a ```Json::EditHandle``
 * ```RemoveElement( handle, index )``` and ```RemoveMember( handle, name )``` remove an element or a member, and fail with ```Status::kIndexOutOfRange``` or ```Status::kNameNotPresent``` when there is none.
 * ```EmptyObject( handle )``` removes every member of an object.
 
-The ```data``` of an edit is anything that serializes: a number, a ```bool```, a string, an array, a structure with process rules, ```Json::Null```, or a ```Json::Value``` of this document or another, which is copied.
+The ```data``` of an edit is anything that serializes: a ```double```, a ```float```, a ```bool```, a string, an array, a structure with process rules, ```Json::Null```, or a ```Json::Value``` of this document or another, which is copied.
 ```cxx
 const Json::Value& root   = *jsonStructuredData.GetRoot();
 Json::EditHandle   object = jsonStructuredData.Edit( root );
@@ -187,7 +187,7 @@ Json::EditHandle text = jsonStructuredData.Edit( *root.AsObject().Find( "text" )
 
 jsonStructuredData.SerializeAt( text, "Hello" );
 ```
-An edit moves the elements or members of the array or object it changes, while the array or object itself stays where it is, so pointers to its elements or members, and views into them, are not valid after the edit. A handle is kept up to date by the edits it is given, and any other change to the document, an edit through another handle, a parse, a ```SerializeFrom``` or a ```Clear```, makes it stale: an edit through it then fails with ```Status::kStaleEditHandle```, and its ```Get()``` gives ```nullptr```. Take a handle from a value just found, since a pointer kept across an edit can point at another value. Memory that a removal frees, or that an array or object outgrows, comes back when the document is cleared.
+An edit moves the elements or members of the array or object it changes, so pointers to its elements or members, and views into them, are not valid after the edit. The array or object itself stays where it is, and a view of it stays valid unless ```SerializeAt``` gives it another type. A handle is kept up to date by the edits it is given, and any other change to the document, an edit through another handle, a parse, a ```SerializeFrom``` or a ```Clear```, makes it stale: an edit through it then fails with ```Status::kStaleEditHandle```, and its ```Get()``` gives ```nullptr```. Take a handle from a value just found, since a pointer kept across an edit can point at another value. Memory that a removal frees, or that an array or object outgrows, comes back when the document is cleared.
 
 ### Serializing your own types
 A ```Serialize( Json::Node, const T& )``` function, or a ```Serialize( Json::Node ) const``` member, writes a type that has no process rules. A ```Node``` is a value being built: ```SetNull```, ```SetBool```, ```SetNumber```, ```SetFloat```, ```SetString```, ```SetArray``` and ```SetObject``` give it its value, and ```AppendElement``` and ```AddMember``` give the node of a new element or member of an array or object. The first call that fails fails the whole build, so a function may check only the status of its last call:
@@ -208,6 +208,14 @@ Json::Status Serialize( Json::Node node, const Point& point )
 A ```Serialize``` function must leave the document being built alone: an edit, a ```SerializeFrom``` or a parse of it during the build fails with ```Status::kBuildInProgress```, and a ```Clear``` of it does nothing.
 
 ## Versions
+### Version 3.0.1
+* ```SerializeFrom``` may be given a value of the document itself, as in ```doc.SerializeFrom( *doc.GetRoot()->AsObject().Find( "keep" ) )```, and ```ParseText``` a string of it. 3.0 read such a value from memory the document had already handed back. A ```SerializeFrom``` now holds the old document until the new one is built.
+* A ```Serialize``` that goes on after an array failed to close, as when a block source refuses its memory, no longer crashes the build.
+* ```AddMember``` with a null name fails with ```Status::kNameNotPresent```, through an ```EditHandle``` or a ```Node```, instead of adding a member named ```""```, and ```AddMember``` and ```RemoveMember``` given a null name and no length no longer read through it, nor do ```Deserialize``` and ```Validate``` of a member.
+* ```Write``` fails with ```Status::kFileTooLarge``` on a string of 2 GiB or more instead of crashing, serializing a ```std::string``` or a ```std::map``` name of 4 GiB or more fails with ```Status::kMaximumStringByteCountExceeded``` instead of keeping only part of it, and so does reading a string of 2 GiB or more into a ```String<>``` or an ```ObjectMap``` name, which 3.0 copied with a negative length.
+* Writing with gcc is about as fast as in 2.3 again. 3.0 wrote up to 1.76 times slower with gcc, which copied the growing output one byte at a time and read the last characters of each string through a call to ```memcpy```.
+* A view of a value that ```SerializeAt``` replaces stays valid only when the new value has the same type. 3.0 promised it in every case, but a view of an array or object replaced by a value of another type reads what is no longer there.
+
 ### Version 3.0
 Version 3.0 replaces the value classes of 2.x with plain values read through views, and adds editing in place, ```Json::Read```, block sources and ```float``` members written in their shortest form. Parsing is faster. Code that parses, validates, deserializes, serializes and writes through the ```DEFINE_JSON4C4_FUNCTIONS``` and ```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` macros needs no change. Code that reads values or defines its own functions changes as follows:
 
@@ -233,7 +241,7 @@ A ```Validate``` or ```Deserialize``` function of your own that takes a ```const
 * An optional member that is present must be valid as a whole. 2.x ignored a member missing inside it, so it could succeed and leave an optional array empty.
 * Strings may hold ```\u0000```, which 2.x refused with ```Status::kStringIllegalEscape```. Validating or deserializing such a string into a ```String<>``` fails with ```Status::kStringHoldsZero```.
 * ```SerializeFrom``` fails on a NaN or an infinity, which 2.x refused only when writing, and a failed ```SerializeFrom``` leaves the document empty.
-* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange```, ```kStaleEditHandle``` and ```kBuildInProgress``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
+* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange```, ```kStaleEditHandle``` and ```kBuildInProgress``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces, and one spells beginning correctly.
 
 ### Version 2.3
 * ```ParseText``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.
@@ -286,7 +294,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v3.0.0 # Or whatever version you select
+  GIT_TAG v3.0.1 # Or whatever version you select
   GIT_SHALLOW TRUE
 )
 

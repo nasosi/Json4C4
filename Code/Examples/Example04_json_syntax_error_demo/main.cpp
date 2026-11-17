@@ -43,7 +43,7 @@ struct TextBox
     double       height = 0;
 };
 
-// Define process rules for deserialization / serialization / validation. A none macro is found in Example03_no_macros
+// Define process rules for deserialization / serialization / validation. An example without macros is in Example03_no_macros
 #define TEXTBOX_PROTO "text", object.text, "width", object.width, "height", object.height
 
 DEFINE_JSON4C4_FUNCTIONS( TextBox, TEXTBOX_PROTO )

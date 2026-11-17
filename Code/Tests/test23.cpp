@@ -245,7 +245,9 @@ struct Custom
         kNumberForOpenObject,
         kLargeObject,
         kStatusesIgnored,
-        kMisuseIgnored
+        kMisuseIgnored,
+        kLongArrayIgnored,
+        kNullName
     };
 
     Kind kind = Kind::kLargeObject;
@@ -307,6 +309,25 @@ Json::Status Serialize( Json::Node node, const Custom& custom ) noexcept
         case Custom::Kind::kMisuseIgnored:
             node.SetNumber( 1 );
             return Json::Status::kOk;
+
+        case Custom::Kind::kLongArrayIgnored:
+            // A long array, which takes a block of its own when it closes, then three members, with every status
+            // ignored, so that the build goes on when that block is refused.
+            node.AddMember( "numbers", member );
+            Json::SerializeValue( member, std::vector<double>( 1000, 0.5 ) );
+
+            for ( int a = 0; a < 3; a++ )
+            {
+                snprintf( name, sizeof( name ), "k%d", a );
+                node.AddMember( name, element );
+                element.SetNumber( a );
+            }
+
+            return Json::Status::kOk;
+
+        case Custom::Kind::kNullName:
+            status = ( status == Json::Status::kOk ) ? node.AddMember( nullptr, 0, member ) : status;
+            return ( status == Json::Status::kOk ) ? member.SetNumber( 1 ) : status;
     }
 
     return Json::Status::kOk;
@@ -345,6 +366,7 @@ void TestRules()
     CheckStatus( SerializeCustom( data, Custom::Kind::kElementInObject ), Json::Status::kInvalidValueType, "an element added to an object" );
     CheckStatus( SerializeCustom( data, Custom::Kind::kMemberWhileInnerOpen ), Json::Status::kInvalidValueType, "a member added while another object is open" );
     CheckStatus( SerializeCustom( data, Custom::Kind::kNumberForOpenObject ), Json::Status::kInvalidValueType, "a number given to an open object" );
+    CheckStatus( SerializeCustom( data, Custom::Kind::kNullName ), Json::Status::kNameNotPresent, "a member with a null name" );
     CheckStatus( SerializeCustom( data, Custom::Kind::kMisuseIgnored ), Json::Status::kInvalidValueType, "a failed call fails the build" );
     Check( !data.GetRoot(), "a failed call leaves the document empty" );
 
@@ -440,6 +462,9 @@ void TestRefusedBlocks()
 
     custom.kind = Custom::Kind::kStatusesIgnored;
     CheckRefusals( custom, 4, "refused blocks with statuses ignored" );
+
+    custom.kind = Custom::Kind::kLongArrayIgnored;
+    CheckRefusals( custom, 4, "refused blocks of a long array with statuses ignored" );
 
     Array<double> numbers;
 

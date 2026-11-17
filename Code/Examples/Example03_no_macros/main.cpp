@@ -164,20 +164,25 @@ int main()
             return 1;
         }
 
-        printf( "Serialized data to Data/Examples/carModified.json" );
+        printf( "Wrote the parsed data to Data/Examples/carRewrite.json.\n" );
     }
 
     // Modify the structure and write to another file
     {
         car.priceDollars = 1;
-        jsonStructuredData.SerializeFrom( car );
+
+        if ( jsonStructuredData.SerializeFrom( car ) != Json::Status::kOk )
+        {
+            fprintf( stderr, "Error serializing the structure.\n" );
+            return 1;
+        }
 
         if ( jsonStructuredData.Write( "Data/Examples/carModified.json" ) != Json::Status::kOk )
         {
             fprintf( stderr, "Error writing to file.\n" );
             return 1;
         }
-        printf( "Wrote a modified version to Data/Examples/carModified.json" );
+        printf( "Wrote a modified version to Data/Examples/carModified.json.\n" );
     }
 
     return 0;
