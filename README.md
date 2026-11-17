@@ -208,6 +208,13 @@ Json::Status Serialize( Json::Node node, const Point& point )
 A ```Serialize``` function must leave the document being built alone: an edit, a ```SerializeFrom``` or a parse of it during the build fails with ```Status::kBuildInProgress```, and a ```Clear``` of it does nothing.
 
 ## Versions
+### Version 3.0.1
+* ```SerializeFrom``` may be given a value of the document itself, as in ```doc.SerializeFrom( *doc.GetRoot()->AsObject().Find( "keep" ) )```, ```ParseText``` a string of it, and ```Parse``` a file named by one. 3.0 read such a value from memory the document had already handed back. A ```SerializeFrom``` now holds the old document until the new one is built.
+* A ```Serialize``` that goes on after an array failed to close, as when a block source refuses its memory, no longer crashes the build.
+* ```AddMember``` with a null name fails with ```Status::kNameNotPresent```, through an ```EditHandle``` or a ```Node```, instead of adding a member named ```""```, and ```AddMember``` and ```RemoveMember``` given a null name and no length no longer read through it.
+* ```Write``` fails with ```Status::kFileTooLarge``` on a string of 2 GiB or more instead of crashing, and serializing a ```std::string``` of 4 GiB or more fails with ```Status::kMaximumStringByteCountExceeded``` instead of keeping only part of it.
+* A view of a value that ```SerializeAt``` replaces stays valid only when the new value has the same type. 3.0 promised it in every case, but a view of an array or object replaced by a value of another type reads what is no longer there.
+
 ### Version 3.0
 Version 3.0 replaces the value classes of 2.x with plain values read through views, and adds editing in place, ```Json::Read```, block sources and ```float``` members written in their shortest form. Parsing is faster. Code that parses, validates, deserializes, serializes and writes through the ```DEFINE_JSON4C4_FUNCTIONS``` and ```DEFINE_JSON4C4_MEMBER_FUNCTIONS``` macros needs no change. Code that reads values or defines its own functions changes as follows:
 
@@ -286,7 +293,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v3.0.0 # Or whatever version you select
+  GIT_TAG v3.0.1 # Or whatever version you select
   GIT_SHALLOW TRUE
 )
 
