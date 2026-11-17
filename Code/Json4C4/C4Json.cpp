@@ -2491,14 +2491,11 @@ namespace C4
         class Writer
         {
         public:
-            Writer( Array<char>& outputText, uint32 indentation, char indentationCharacter ) noexcept :
-                output( outputText ),
-                indentationLength( indentation ),
-                indentationChar( indentationCharacter )
+            Writer( uint32 indentation, char indentationCharacter ) noexcept : indentationLength( indentation ), indentationChar( indentationCharacter )
             {
             }
 
-            Status Write( const Value& value, uint32 depth )
+            Status Write( Array<char>& output, const Value& value, uint32 depth )
             {
                 switch ( value.GetType() )
                 {
@@ -2509,7 +2506,7 @@ namespace C4
                         return AppendText( output, *value.AsBool() ? "true" : "false" );
 
                     case Type::kNumber:
-                        return WriteNumber( *value.AsNumber(), value.IsFloat() );
+                        return WriteNumber( output, *value.AsNumber(), value.IsFloat() );
 
                     case Type::kString:
                     {
@@ -2518,28 +2515,27 @@ namespace C4
                     }
 
                     case Type::kArray:
-                        return WriteArray( value.AsArray(), depth );
+                        return WriteArray( output, value.AsArray(), depth );
 
                     case Type::kObject:
-                        return WriteObject( value.AsObject(), depth );
+                        return WriteObject( output, value.AsObject(), depth );
                 }
 
                 return Status::kInvalidValueType;
             }
 
         private:
-            Array<char>& output;
-            uint32       indentationLength;
-            char         indentationChar;
+            uint32 indentationLength;
+            char   indentationChar;
 
-            Status Indent( uint32 depth )
+            Status Indent( Array<char>& output, uint32 depth )
             {
                 uint64 length = uint64( depth ) * indentationLength;
 
                 return ( length > JSON4C4_MAX_FILE_SIZE ) ? Status::kFileTooLarge : ExpandArray( output, indentationChar, uint32( length ) );
             }
 
-            Status WriteNumber( double number, bool single )
+            Status WriteNumber( Array<char>& output, double number, bool single )
             {
                 if ( !( number >= -maxDouble && number <= maxDouble ) )
                 {
@@ -2551,18 +2547,18 @@ namespace C4
                 return AppendText( output, text, single ? WriteFloat( float( number ), text ) : ntt_write_f64( number, text ) );
             }
 
-            Status WriteArray( const ArrayView& array, uint32 depth )
+            Status WriteArray( Array<char>& output, const ArrayView& array, uint32 depth )
             {
                 uint32 count  = array.GetElementCount();
                 Status status = AppendText( output, "[\n" );
 
                 for ( uint32 a = 0; ( status == Status::kOk ) && ( a != count ); a++ )
                 {
-                    status = Indent( depth + 1 );
+                    status = Indent( output, depth + 1 );
 
                     if ( status == Status::kOk )
                     {
-                        status = Write( array[ a ], depth + 1 );
+                        status = Write( output, array[ a ], depth + 1 );
                     }
 
                     if ( status == Status::kOk )
@@ -2573,13 +2569,13 @@ namespace C4
 
                 if ( status == Status::kOk )
                 {
-                    status = Indent( depth );
+                    status = Indent( output, depth );
                 }
 
                 return ( status == Status::kOk ) ? AppendText( output, "]", 1 ) : status;
             }
 
-            Status WriteObject( const ObjectView& object, uint32 depth )
+            Status WriteObject( Array<char>& output, const ObjectView& object, uint32 depth )
             {
                 uint32 count  = object.GetMemberCount();
                 Status status = AppendText( output, "{\n" );
@@ -2588,7 +2584,7 @@ namespace C4
                 {
                     const Member& member = object.begin()[ a ];
 
-                    status = Indent( depth + 1 );
+                    status = Indent( output, depth + 1 );
 
                     if ( status == Status::kOk )
                     {
@@ -2602,7 +2598,7 @@ namespace C4
 
                     if ( status == Status::kOk )
                     {
-                        status = Write( member.GetValue(), depth + 1 );
+                        status = Write( output, member.GetValue(), depth + 1 );
                     }
 
                     if ( status == Status::kOk )
@@ -2613,7 +2609,7 @@ namespace C4
 
                 if ( status == Status::kOk )
                 {
-                    status = Indent( depth );
+                    status = Indent( output, depth );
                 }
 
                 return ( status == Status::kOk ) ? AppendText( output, "}", 1 ) : status;
@@ -2630,8 +2626,8 @@ namespace C4
             return Detail::MayThrow(
                 [ & ]()
                 {
-                    Writer writer( output, indentationLength, indentationChar );
-                    return writer.Write( *root, 0 );
+                    Writer writer( indentationLength, indentationChar );
+                    return writer.Write( output, *root, 0 );
                 } );
         }
 
