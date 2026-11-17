@@ -1463,14 +1463,18 @@ namespace C4
             return text == stop;
         }
 
-        // Orders names by their bytes, read as unsigned values, and a name before the longer names it begins.
+        // Orders names by their length, and names of the same length by their bytes, read as unsigned values.
         int32 CompareNames( const char* first, uint32 firstLength, const char* second, uint32 secondLength ) noexcept
         {
-            const uint8* a      = reinterpret_cast<const uint8*>( first );
-            const uint8* b      = reinterpret_cast<const uint8*>( second );
-            uint32       length = ( firstLength < secondLength ) ? firstLength : secondLength;
+            if ( firstLength != secondLength )
+            {
+                return ( firstLength < secondLength ) ? -1 : 1;
+            }
 
-            for ( uint32 i = 0; i < length; i++ )
+            const uint8* a = reinterpret_cast<const uint8*>( first );
+            const uint8* b = reinterpret_cast<const uint8*>( second );
+
+            for ( uint32 i = 0; i < firstLength; i++ )
             {
                 if ( a[ i ] != b[ i ] )
                 {
@@ -1478,7 +1482,7 @@ namespace C4
                 }
             }
 
-            return ( firstLength < secondLength ) ? -1 : int32( firstLength > secondLength );
+            return 0;
         }
 
         bool StringView::operator==( const StringView& other ) const noexcept
