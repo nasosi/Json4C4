@@ -1766,6 +1766,11 @@ namespace C4
                 return stack.GetSize();
             }
 
+            void SetSize( uint64 size ) noexcept
+            {
+                stack.SetSize( size );
+            }
+
             uint32 GetMemberCount( uint64 base ) const noexcept
             {
                 return uint32( ( stack.GetSize() - base ) / sizeof( PendingMember ) );
@@ -3183,6 +3188,8 @@ namespace C4
                 return Status::kOk;
             }
 
+            // An array or object that fails to close leaves nothing it held on the stack, so that a Serialize that goes
+            // on adds to the one around it.
             Status CloseSince( uint32 openCount ) noexcept
             {
                 while ( GetOpenCount() > openCount )
@@ -3204,6 +3211,7 @@ namespace C4
 
                     if ( status != Status::kOk )
                     {
+                        children.SetSize( container.base );
                         return status;
                     }
 

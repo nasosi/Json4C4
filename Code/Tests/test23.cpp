@@ -245,7 +245,8 @@ struct Custom
         kNumberForOpenObject,
         kLargeObject,
         kStatusesIgnored,
-        kMisuseIgnored
+        kMisuseIgnored,
+        kLongArrayIgnored
     };
 
     Kind kind = Kind::kLargeObject;
@@ -306,6 +307,21 @@ Json::Status Serialize( Json::Node node, const Custom& custom ) noexcept
 
         case Custom::Kind::kMisuseIgnored:
             node.SetNumber( 1 );
+            return Json::Status::kOk;
+
+        case Custom::Kind::kLongArrayIgnored:
+            // A long array, which takes a block of its own when it closes, then three members, with every status
+            // ignored, so that the build goes on when that block is refused.
+            node.AddMember( "numbers", member );
+            Json::SerializeValue( member, std::vector<double>( 1000, 0.5 ) );
+
+            for ( int a = 0; a < 3; a++ )
+            {
+                snprintf( name, sizeof( name ), "k%d", a );
+                node.AddMember( name, element );
+                element.SetNumber( a );
+            }
+
             return Json::Status::kOk;
     }
 
@@ -440,6 +456,9 @@ void TestRefusedBlocks()
 
     custom.kind = Custom::Kind::kStatusesIgnored;
     CheckRefusals( custom, 4, "refused blocks with statuses ignored" );
+
+    custom.kind = Custom::Kind::kLongArrayIgnored;
+    CheckRefusals( custom, 4, "refused blocks of a long array with statuses ignored" );
 
     Array<double> numbers;
 
