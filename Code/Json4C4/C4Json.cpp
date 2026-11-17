@@ -2648,7 +2648,7 @@ namespace C4
                 return Status::kInvalidValueType;
             }
 
-            return Detail::HoldsZero( string ) ? Status::kStringHoldsZero : Status::kOk;
+            return Detail::CheckStringCopy( string );
         }
 
         Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept
