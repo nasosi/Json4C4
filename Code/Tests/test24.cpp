@@ -140,6 +140,12 @@ void TestMembers()
     CheckStatus( data.RemoveMember( root, "missing" ), Json::Status::kNameNotPresent, "remove a missing member" );
     CheckStatus( data.AddMember( root, "z", 5.0 ), Json::Status::kOk, "add a member" );
     CheckStatus( data.AddMember( root, "z", 6.0 ), Json::Status::kDuplicateName, "a repeated name is refused" );
+
+    const char* none = nullptr;
+
+    CheckStatus( data.AddMember( root, none, 0, 6.0 ), Json::Status::kNameNotPresent, "a null name of length 0 is refused" );
+    CheckStatus( data.AddMember( root, none, 6.0 ), Json::Status::kNameNotPresent, "a null name is refused" );
+    CheckStatus( data.RemoveMember( root, none ), Json::Status::kNameNotPresent, "a removal by a null name is refused" );
     Check( Holds( data, "{ \"a\": 1, \"c\": 3, \"z\": 5 }" ), "members removed and added in order" );
     Check( object.FindNumber( "z" ) && ( *object.FindNumber( "z" ) == 5 ), "a view of the edited object stays valid" );
 

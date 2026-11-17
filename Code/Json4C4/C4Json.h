@@ -660,7 +660,7 @@ namespace C4
             {
                 uint32 length = 0;
 
-                while ( text[ length ] != 0 )
+                while ( text && ( text[ length ] != 0 ) )
                 {
                     length++;
                 }

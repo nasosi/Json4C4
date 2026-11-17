@@ -3162,6 +3162,11 @@ namespace C4
                     return Status::kInvalidValueType;
                 }
 
+                if ( !name )
+                {
+                    return Status::kNameNotPresent;
+                }
+
                 const char* copy;
                 Status      status = CopyText( name, length, copy );
 
@@ -3466,6 +3471,7 @@ namespace C4
 
                 case ChangeKind::kAddMember:
                     status = CheckEdit( *change.handle, Type::kObject );
+                    status = ( ( status == Status::kOk ) && !change.name ) ? Status::kNameNotPresent : status;
                     status =
                         ( ( status == Status::kOk ) && change.handle->value->AsObject().Find( change.name, change.length ) ) ? Status::kDuplicateName : status;
                     break;
