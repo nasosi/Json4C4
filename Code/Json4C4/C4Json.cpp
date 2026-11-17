@@ -1555,6 +1555,25 @@ namespace C4
             }
         }
 
+        // Whether an address lies in one of the document's blocks.
+        bool StructuredData::Owns( const void* address ) const noexcept
+        {
+            machine_address at = reinterpret_cast<machine_address>( address );
+
+            for ( const Block* block = blocks; block; block = block->next )
+            {
+                machine_address start = reinterpret_cast<machine_address>( block + 1 );
+                machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
+
+                if ( ( at >= start ) && ( at < end ) )
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // Sizes are multiples of 8, and values, arrays and members are taken from the bottom of the free space of the
         // current block, so they stay aligned, and string bytes from its top.
         void* StructuredData::AllocateAligned( uint64 size ) noexcept
@@ -2307,6 +2326,7 @@ namespace C4
             }
         };
 
+        // A text in the document's own blocks, such as one of its strings, is parsed before they are handed back.
         ParseResult StructuredData::ParseText( const char* text, uint64 length, const ParseOptions& options ) noexcept
         {
             if ( builder )
@@ -2314,6 +2334,16 @@ namespace C4
                 return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
 
+            Block*      replaced = Owns( text ) ? TakeBlocks() : nullptr;
+            ParseResult result   = ClearAndParse( text, length, options );
+
+            FreeBlocks( replaced );
+
+            return result;
+        }
+
+        ParseResult StructuredData::ClearAndParse( const char* text, uint64 length, const ParseOptions& options ) noexcept
+        {
             Clear();
 
             if ( ( text == nullptr ) || ( length == 0 ) )
@@ -2379,15 +2409,14 @@ namespace C4
             return ParseText( nullTerminatedTextBuffer.begin(), uint64( ( count > 0 ) ? count - 1 : 0 ), options );
         }
 
-        // The text of a file is read into a block from the block source, handed back when the parse ends.
+        // The file is opened before the document is cleared, so that its name may be a string of the document. Its text
+        // is read into a block from the block source, handed back when the parse ends.
         ParseResult StructuredData::Parse( const char* fileName, const ParseOptions& options ) noexcept
         {
             if ( builder )
             {
                 return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
-
-            Clear();
 
             File       file;
             FileStatus fileStatus = kFileOpenFailed;
@@ -2398,6 +2427,8 @@ namespace C4
                     fileStatus = file.OpenFile( fileName, kFileReadOnly );
                     return Status::kOk;
                 } );
+
+            Clear();
 
             if ( fileStatus != kFileOkay )
             {
@@ -3370,21 +3401,13 @@ namespace C4
         // A value in none of this document's blocks, such as a value of another document, gives an empty handle.
         EditHandle StructuredData::Edit( const Value& value ) noexcept
         {
-            EditHandle      handle;
-            machine_address address = reinterpret_cast<machine_address>( &value );
+            EditHandle handle;
 
-            for ( const Block* block = blocks; block; block = block->next )
+            if ( Owns( &value ) )
             {
-                machine_address start = reinterpret_cast<machine_address>( block + 1 );
-                machine_address end   = reinterpret_cast<machine_address>( block ) + machine_address( block->size );
-
-                if ( ( address >= start ) && ( address < end ) )
-                {
-                    handle.document = this;
-                    handle.value    = &value;
-                    handle.edit     = editCount;
-                    break;
-                }
+                handle.document = this;
+                handle.value    = &value;
+                handle.edit     = editCount;
             }
 
             return handle;

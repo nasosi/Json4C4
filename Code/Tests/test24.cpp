@@ -366,7 +366,8 @@ void TestSelfCopies()
            "the copies" );
 }
 
-// A document replaced by one of its own values reads it before it hands back the blocks that hold it.
+// A document replaced by one of its own values, or by a parse of one of its strings, reads it before it hands back the
+// blocks that hold it.
 void TestOwnValues()
 {
     PoisoningSource source;
@@ -377,6 +378,17 @@ void TestOwnValues()
         CheckStatus( Parse( data, "{ \"keep\": { \"name\": \"a string\", \"list\": [ 1, 2, 3 ] }, \"other\": 2 }" ), Json::Status::kOk, "parse a document" );
         CheckStatus( data.SerializeFrom( *data.GetRoot()->AsObject().Find( "keep" ) ), Json::Status::kOk, "serialize a value of the document onto it" );
         Check( Holds( data, "{ \"name\": \"a string\", \"list\": [ 1, 2, 3 ] }" ), "the document holds its former value" );
+
+        CheckStatus( Parse( data, "{ \"text\": \"[ 1, \\\"two\\\" ]\" }" ), Json::Status::kOk, "parse a document that holds a text" );
+
+        Json::StringView text = data.GetRoot()->AsObject().FindString( "text" );
+
+        CheckStatus( data.ParseText( text.GetText(), text.GetLength() ).status, Json::Status::kOk, "parse a string of the document" );
+        Check( Holds( data, "[ 1, \"two\" ]" ), "the document holds the parsed string" );
+
+        CheckStatus( Parse( data, "{ \"file\": \"Data/Examples/simple.json\\u0000\" }" ), Json::Status::kOk, "parse a document that holds a file name" );
+        CheckStatus( data.Parse( data.GetRoot()->AsObject().FindString( "file" ).GetText() ).status, Json::Status::kOk, "parse a file named in the document" );
+        Check( Holds( data, "{ \"text\": \"Color\", \"width\": 5, \"height\": 10 }" ), "the document holds the file" );
     }
 
     Check( source.outstandingCount == 0, "every block of a document replaced by its own values comes back" );

@@ -796,8 +796,11 @@ namespace C4
             char* AllocateBytes( uint64 size ) noexcept;
             void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
 
+            bool   Owns( const void* address ) const noexcept;
             Block* TakeBlocks() noexcept;
             void   FreeBlocks( Block* block ) noexcept;
+
+            ParseResult ClearAndParse( const char* text, uint64 length, const ParseOptions& options ) noexcept;
 
             template <class T>
             Status Build( const Change& change, const T& data ) noexcept;
