@@ -699,7 +699,7 @@ namespace C4
         // A character that may run into the end of the text is read from a copy followed by zeros.
         inline int32 GetPlainCharLength( const uint8* byte, const uint8* end ) noexcept
         {
-            if ( end - byte >= 4 )
+            if ( ( end - byte >= 4 ) || ( ( byte != end ) && ( byte[ 0 ] < 0x80U ) ) )
             {
                 return GetPlainCharLength( byte );
             }
