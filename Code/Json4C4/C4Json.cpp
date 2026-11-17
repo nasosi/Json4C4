@@ -696,6 +696,20 @@ namespace C4
             return ( ( c == 0xEDU ) && ( byte[ 1 ] >= 0xA0U ) ) ? 0 : length;
         }
 
+        // Whether eight bytes are all ASCII characters that a string literal holds unescaped. The top bit of a byte is set
+        // by subtracting 0x20 from a control character, or 1 from a quote or a backslash once the bytes are XORed with
+        // it, and a byte from 0x80 up has it already. Other bytes subtract without a borrow, so a borrow only changes
+        // the bytes after one that is found.
+        inline bool IsPlainAscii( uint64 bytes ) noexcept
+        {
+            constexpr uint64 ones = 0x0101010101010101;
+
+            uint64 quotes      = bytes ^ ( ones * '"' );
+            uint64 backslashes = bytes ^ ( ones * '\\' );
+
+            return ( ( ( bytes - ones * 0x20 ) | ( quotes - ones ) | ( backslashes - ones ) | bytes ) & ( ones * 0x80 ) ) == 0;
+        }
+
         // A character that may run into the end of the text is read from a copy followed by zeros.
         inline int32 GetPlainCharLength( const uint8* byte, const uint8* end ) noexcept
         {
@@ -803,10 +817,10 @@ namespace C4
             return ( c == space ) || ( c == tab ) || ( c == newLine ) || ( c == carriageReturn );
         }
 
-        inline uint64 ReadEightBytes( const char* text ) noexcept
+        inline uint64 ReadEightBytes( const void* bytes ) noexcept
         {
             uint64 word;
-            memcpy( &word, text, 8 );
+            memcpy( &word, bytes, 8 );
 
             return word;
         }
@@ -1055,6 +1069,11 @@ namespace C4
 
                     if ( byte < stop )
                     {
+                        while ( ( stop - byte >= 8 ) && IsPlainAscii( ReadEightBytes( byte ) ) )
+                        {
+                            byte += 8;
+                        }
+
                         while ( int32 length = GetPlainCharLength( byte ) )
                         {
                             byte += length;
