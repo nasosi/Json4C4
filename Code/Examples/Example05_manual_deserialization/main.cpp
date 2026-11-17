@@ -64,7 +64,7 @@ int main()
         return 1;
     }
 
-    // Get the value of key "width". If the query was not succesful exit.
+    // Get the value of key "width". If the query was not successful exit.
     const double* width = object.FindNumber( "width" );
     if ( !width )
     {

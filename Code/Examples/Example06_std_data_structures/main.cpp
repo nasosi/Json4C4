@@ -47,7 +47,7 @@ struct TextBox
     std::vector<double> linespec;
 };
 
-// 1. Define process rules for deserialization/serialization/validation. A none-macro example is found in Exampl03_no_macros
+// 1. Define process rules for deserialization/serialization/validation. An example without macros is in Example03_no_macros
 #define TEXTBOX_PROTO "text", object.text, "width", object.width, "height", object.height, "linespec", object.linespec
 
 DEFINE_JSON4C4_FUNCTIONS( TextBox, TEXTBOX_PROTO )
@@ -55,7 +55,7 @@ DEFINE_JSON4C4_FUNCTIONS( TextBox, TEXTBOX_PROTO )
 int main()
 {
     printf( "Json4C4 version %s.\n", Json::GetVersion() );
-    printf( "Example06: Deserializng to std::string and std::vector.\n" );
+    printf( "Example06: Deserializing to std::string and std::vector.\n" );
 
     // 2. Parse the file and check parsing status
     Json::StructuredData jsonStructuredData;
