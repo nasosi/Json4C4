@@ -146,6 +146,10 @@ void TestMembers()
     CheckStatus( data.AddMember( root, none, 0, 6.0 ), Json::Status::kNameNotPresent, "a null name of length 0 is refused" );
     CheckStatus( data.AddMember( root, none, 6.0 ), Json::Status::kNameNotPresent, "a null name is refused" );
     CheckStatus( data.RemoveMember( root, none ), Json::Status::kNameNotPresent, "a removal by a null name is refused" );
+
+    double read = 0;
+    CheckStatus( Json::Deserialize( *root.Get(), none, read ), Json::Status::kNameNotPresent, "a read by a null name finds nothing" );
+    CheckStatus( Json::Validate( *root.Get(), none, read ), Json::Status::kNameNotPresent, "a check by a null name finds nothing" );
     Check( Holds( data, "{ \"a\": 1, \"c\": 3, \"z\": 5 }" ), "members removed and added in order" );
     Check( object.FindNumber( "z" ) && ( *object.FindNumber( "z" ) == 5 ), "a view of the edited object stays valid" );
 
