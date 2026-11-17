@@ -286,7 +286,7 @@ include( FetchContent )
 FetchContent_Declare(
   Json4C4
   GIT_REPOSITORY "https://github.com/nasosi/Json4C4"
-  GIT_TAG v2.3.0 # Or whatever version you select
+  GIT_TAG v3.0.0 # Or whatever version you select
   GIT_SHALLOW TRUE
 )
 
