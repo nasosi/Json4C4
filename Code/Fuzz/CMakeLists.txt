@@ -1,0 +1,15 @@
+add_executable( Json4C4FuzzParse FuzzParse.cpp )
+target_link_libraries( Json4C4FuzzParse PRIVATE Json4C4::Json4C4 )
+set_target_properties( Json4C4FuzzParse PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" )
+
+if ( CMAKE_CXX_COMPILER_ID STREQUAL "Clang" )
+    target_link_options( Json4C4FuzzParse PRIVATE -fsanitize=fuzzer )
+else()
+    target_sources( Json4C4FuzzParse PRIVATE FuzzDriver.cpp )
+endif()
+
+if ( MSVC )
+    target_compile_options( Json4C4FuzzParse PRIVATE /W4 /WX )
+else()
+    target_compile_options( Json4C4FuzzParse PRIVATE -Wall -Wextra -Werror -Wno-strict-aliasing )
+endif()
