@@ -1,6 +1,6 @@
-// Editing a document: members and elements added and removed in place, values replaced, copies between documents,
-// objects that grow past 16 members and shrink back, edits refused or failed leaving the document as it was, and handles
-// that fail closed once the document has changed.
+// Editing a document: members and elements added and removed in place, values replaced, copies within and between
+// documents, a document replaced by one of its own values, objects that grow past 16 members and shrink back, edits
+// refused or failed leaving the document as it was, and handles that fail closed once the document has changed.
 
 #include "TestCheck.h"
 
@@ -41,6 +41,43 @@ public:
         outstandingCount--;
         free( block );
     }
+};
+
+// Hands out blocks with malloc and fills each block handed back with 0xDD, keeping it until the source goes, so that a
+// read of a block the document has handed back reads the fill instead of what the block held.
+class PoisoningSource final : public Json::BlockSource
+{
+public:
+    int outstandingCount = 0;
+
+    ~PoisoningSource()
+    {
+        while ( handedBack )
+        {
+            void* next = *static_cast<void**>( handedBack );
+            free( handedBack );
+            handedBack = next;
+        }
+    }
+
+    void* AllocateBlock( Terathon::uint64 size ) noexcept override
+    {
+        outstandingCount++;
+
+        return malloc( size_t( size ) );
+    }
+
+    void FreeBlock( void* block, Terathon::uint64 size ) noexcept override
+    {
+        outstandingCount--;
+        memset( block, 0xDD, size_t( size ) );
+
+        *static_cast<void**>( block ) = handedBack;
+        handedBack                    = block;
+    }
+
+private:
+    void* handedBack = nullptr;
 };
 
 String<> WriteNew( const Json::StructuredData& data )
@@ -329,6 +366,22 @@ void TestSelfCopies()
            "the copies" );
 }
 
+// A document replaced by one of its own values reads it before it hands back the blocks that hold it.
+void TestOwnValues()
+{
+    PoisoningSource source;
+
+    {
+        Json::StructuredData data( source );
+
+        CheckStatus( Parse( data, "{ \"keep\": { \"name\": \"a string\", \"list\": [ 1, 2, 3 ] }, \"other\": 2 }" ), Json::Status::kOk, "parse a document" );
+        CheckStatus( data.SerializeFrom( *data.GetRoot()->AsObject().Find( "keep" ) ), Json::Status::kOk, "serialize a value of the document onto it" );
+        Check( Holds( data, "{ \"name\": \"a string\", \"list\": [ 1, 2, 3 ] }" ), "the document holds its former value" );
+    }
+
+    Check( source.outstandingCount == 0, "every block of a document replaced by its own values comes back" );
+}
+
 void TestOtherDocuments()
 {
     Json::StructuredData from;
@@ -537,6 +590,7 @@ int main()
     TestEmptyContainers();
     TestCrossingSixteen();
     TestSelfCopies();
+    TestOwnValues();
     TestOtherDocuments();
     TestEditsDuringBuild();
     TestHandles();

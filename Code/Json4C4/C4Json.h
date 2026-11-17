@@ -721,7 +721,8 @@ namespace C4
             template <class T>
             Status DeserializeTo( T& data ) const noexcept;
 
-            // Replaces the document with the values data serializes to. A failure leaves the document empty.
+            // Replaces the document with the values data serializes to, which may be values of the document itself. A
+            // failure leaves the document empty.
             template <class T>
             Status SerializeFrom( const T& data ) noexcept;
 
@@ -794,6 +795,9 @@ namespace C4
             void* AllocateAligned( uint64 size ) noexcept;
             char* AllocateBytes( uint64 size ) noexcept;
             void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
+
+            Block* TakeBlocks() noexcept;
+            void   FreeBlocks( Block* block ) noexcept;
 
             template <class T>
             Status Build( const Change& change, const T& data ) noexcept;

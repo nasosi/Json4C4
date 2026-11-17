@@ -1524,23 +1524,35 @@ namespace C4
         // A Serialize that clears the document it is building leaves it as it is, so that the build keeps its blocks.
         void StructuredData::Clear() noexcept
         {
-            if ( builder )
+            if ( !builder )
             {
-                return;
+                FreeBlocks( TakeBlocks() );
             }
+        }
 
-            while ( blocks )
-            {
-                Block* next = blocks->next;
-                blockSource->FreeBlock( blocks, blocks->size );
-                blocks = next;
-            }
+        // Empties the document and gives its blocks to the caller, to free once nothing reads them.
+        StructuredData::Block* StructuredData::TakeBlocks() noexcept
+        {
+            Block* taken = blocks;
 
+            blocks        = nullptr;
             blockTop      = nullptr;
             blockEnd      = nullptr;
             nextBlockSize = smallestBlockSize;
             root          = nullptr;
             editCount++;
+
+            return taken;
+        }
+
+        void StructuredData::FreeBlocks( Block* block ) noexcept
+        {
+            while ( block )
+            {
+                Block* next = block->next;
+                blockSource->FreeBlock( block, block->size );
+                block = next;
+            }
         }
 
         // Sizes are multiples of 8, and values, arrays and members are taken from the bottom of the free space of the
@@ -2959,12 +2971,17 @@ namespace C4
                 uint64 base;
             };
 
-            StructuredData& document;
-            PendingValues   children;
-            ScratchStack    open;
-            Status          failure = Status::kOk;
+            StructuredData&        document;
+            PendingValues          children;
+            ScratchStack           open;
+            Status                 failure = Status::kOk;
+            StructuredData::Block* replacedBlocks;
 
-            explicit Builder( StructuredData& data ) noexcept : document( data ), children( data ), open( *data.blockSource )
+            Builder( StructuredData& data, StructuredData::Block* replaced ) noexcept :
+                document( data ),
+                children( data ),
+                open( *data.blockSource ),
+                replacedBlocks( replaced )
             {
             }
 
@@ -3397,7 +3414,8 @@ namespace C4
             return ( ( status == Status::kOk ) && ( handle.value->type != type ) ) ? Status::kInvalidValueType : status;
         }
 
-        // The builder lives in a block of its own, handed back when the build ends.
+        // The builder lives in a block of its own, handed back when the build ends, and a SerializeFrom keeps the
+        // blocks of the document it replaces until then, so that the document may be built from its own values.
         Status StructuredData::BeginBuild( const Change& change, Node& rootNode ) noexcept
         {
             Status status = builder ? Status::kBuildInProgress : Status::kOk;
@@ -3427,19 +3445,16 @@ namespace C4
                 return status;
             }
 
-            if ( change.kind == ChangeKind::kDocument )
-            {
-                Clear();
-            }
-
-            void* memory = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
+            Block* replaced = ( change.kind == ChangeKind::kDocument ) ? TakeBlocks() : nullptr;
+            void*  memory   = blockSource->AllocateBlock( RoundUpToEight( sizeof( Builder ) ) );
 
             if ( !memory )
             {
+                FreeBlocks( replaced );
                 return Status::kAllocationRefused;
             }
 
-            builder          = new ( memory ) Builder( *this );
+            builder          = new ( memory ) Builder( *this, replaced );
             rootNode.builder = builder;
             rootNode.offset  = 0;
 
@@ -3455,14 +3470,17 @@ namespace C4
                 return status;
             }
 
-            status      = ( status == Status::kOk ) ? builder->failure : status;
-            Value built = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
+            status          = ( status == Status::kOk ) ? builder->failure : status;
+            Value  built    = ( status == Status::kOk ) ? builder->At( 0 ) : Value();
+            Block* replaced = builder->replacedBlocks;
 
             builder->~Builder();
             blockSource->FreeBlock( builder, RoundUpToEight( sizeof( Builder ) ) );
             builder = nullptr;
 
             status = ( status == Status::kOk ) ? Splice( change, built ) : status;
+
+            FreeBlocks( replaced );
 
             if ( ( status != Status::kOk ) && ( change.kind == ChangeKind::kDocument ) )
             {
