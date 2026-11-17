@@ -680,6 +680,11 @@ namespace C4
             return AppendText( output, text, uint32( Text::GetTextLength( text ) ) );
         }
 
+        inline bool IsContinuationByte( uint32 c ) noexcept
+        {
+            return ( c & 0xC0U ) == 0x80U;
+        }
+
         // The length of the character at byte when a string literal holds it unescaped, or 0 when it has to be escaped or is
         // not valid UTF-8.
         inline int32 GetPlainCharLength( const uint8* byte ) noexcept
@@ -691,9 +696,32 @@ namespace C4
                 return ( ( c >= 0x20U ) && ( c != '"' ) && ( c != '\\' ) );
             }
 
-            int32 length = Text::ValidateUnicodeChar( reinterpret_cast<const char*>( byte ) );
+            if ( ( c - 0xC2U < 0x33U ) && IsContinuationByte( byte[ 1 ] ) )
+            {
+                if ( c < 0xE0U )
+                {
+                    return 2;
+                }
 
-            return ( ( c == 0xEDU ) && ( byte[ 1 ] >= 0xA0U ) ) ? 0 : length;
+                if ( IsContinuationByte( byte[ 2 ] ) )
+                {
+                    if ( c < 0xF0U )
+                    {
+                        uint32 code = ( ( c & 0x0FU ) << 12 ) | ( ( byte[ 1 ] & 0x3FU ) << 6 ) | ( byte[ 2 ] & 0x3FU );
+
+                        return ( ( code >= 0x0800U ) && ( code - 0xD800U >= 0x0800U ) ) ? 3 : 0;
+                    }
+
+                    if ( IsContinuationByte( byte[ 3 ] ) )
+                    {
+                        uint32 code = ( ( c & 0x07U ) << 18 ) | ( ( byte[ 1 ] & 0x3FU ) << 12 ) | ( ( byte[ 2 ] & 0x3FU ) << 6 ) | ( byte[ 3 ] & 0x3FU );
+
+                        return ( code - 0x010000U < 0x100000U ) ? 4 : 0;
+                    }
+                }
+            }
+
+            return 0;
         }
 
         // Whether eight bytes are all ASCII characters that a string literal holds unescaped. The top bit of a byte is set
