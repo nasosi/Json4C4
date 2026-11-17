@@ -205,6 +205,7 @@ Json::Status Serialize( Json::Node node, const Point& point )
     return y.SetNumber( point.y );
 }
 ```
+A ```Serialize``` function must leave the document being built alone: an edit, a ```SerializeFrom``` or a parse of it during the build fails with ```Status::kBuildInProgress```, and a ```Clear``` of it does nothing.
 
 ## Versions
 ### Version 3.0
@@ -232,7 +233,7 @@ A ```Validate``` or ```Deserialize``` function of your own that takes a ```const
 * An optional member that is present must be valid as a whole. 2.x ignored a member missing inside it, so it could succeed and leave an optional array empty.
 * Strings may hold ```\u0000```, which 2.x refused with ```Status::kStringIllegalEscape```. Validating or deserializing such a string into a ```String<>``` fails with ```Status::kStringHoldsZero```.
 * ```SerializeFrom``` fails on a NaN or an infinity, which 2.x refused only when writing, and a failed ```SerializeFrom``` leaves the document empty.
-* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange``` and ```kStaleEditHandle``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
+* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange```, ```kStaleEditHandle``` and ```kBuildInProgress``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
 
 ### Version 2.3
 * ```ParseText``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.

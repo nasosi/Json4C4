@@ -187,7 +187,8 @@ namespace C4
             kAllocationRefused,
             kStringHoldsZero,
             kIndexOutOfRange,
-            kStaleEditHandle
+            kStaleEditHandle,
+            kBuildInProgress
         };
 
         TERATHON_API String<256> StatusToString( const Status& parseResult ) noexcept;
@@ -668,10 +669,10 @@ namespace C4
             }
         } // namespace Detail
 
-        // A value of a document to edit. An edit through it brings it up to date, and any other change to the
-        // document, an edit through another handle, a parse, a SerializeFrom or a Clear, makes it stale, so that edits
-        // through it fail with kStaleEditHandle. Take a handle from a value just found: a pointer kept across an edit
-        // can point at another value, and a handle taken from it would edit that one.
+        // A value of a document to edit, usable while the document lives. An edit through it brings it up to date, and
+        // any other change to the document, an edit through another handle, a parse, a SerializeFrom or a Clear, makes
+        // it stale, so that edits through it fail with kStaleEditHandle. Take a handle from a value just found: a
+        // pointer kept across an edit can point at another value, and a handle taken from it would edit that one.
         class EditHandle
         {
             friend class StructuredData;

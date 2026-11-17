@@ -610,11 +610,12 @@ namespace C4
                                                     "A block source refused an allocation",
                                                     "String holds a zero character",
                                                     "Array index out of range",
-                                                    "Edit handle taken before the document changed" };
+                                                    "Edit handle taken before the document changed",
+                                                    "Document is being built" };
 
         constexpr unsigned int statusStringCount = sizeof( StatusString ) / sizeof( StatusString[ 0 ] );
 
-        static_assert( statusStringCount == (unsigned int)( Status::kStaleEditHandle ) + 1, "StatusString must have one entry per Status" );
+        static_assert( statusStringCount == (unsigned int)( Status::kBuildInProgress ) + 1, "StatusString must have one entry per Status" );
 
         TERATHON_API String<256> StatusToString( const Status& status ) noexcept
         {
@@ -2298,7 +2299,7 @@ namespace C4
         {
             if ( builder )
             {
-                return ParseResult { Status::kInvalidValueType, 0, 0 };
+                return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
 
             Clear();
@@ -2353,7 +2354,7 @@ namespace C4
 
             if ( builder )
             {
-                return ParseResult { Status::kInvalidValueType, 0, 0 };
+                return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
 
             if ( ( count >= 2 ) && ( nullTerminatedTextBuffer[ count - 1 ] != 0 ) )
@@ -2371,7 +2372,7 @@ namespace C4
         {
             if ( builder )
             {
-                return ParseResult { Status::kInvalidValueType, 0, 0 };
+                return ParseResult { Status::kBuildInProgress, 0, 0 };
             }
 
             Clear();
@@ -3376,7 +3377,12 @@ namespace C4
         // handle, and for a value that is not of the type it needs.
         Status StructuredData::CheckEdit( const EditHandle& handle ) const noexcept
         {
-            if ( builder || ( handle.document != this ) )
+            if ( builder )
+            {
+                return Status::kBuildInProgress;
+            }
+
+            if ( handle.document != this )
             {
                 return Status::kInvalidValueType;
             }
@@ -3394,7 +3400,7 @@ namespace C4
         // The builder lives in a block of its own, handed back when the build ends.
         Status StructuredData::BeginBuild( const Change& change, Node& rootNode ) noexcept
         {
-            Status status = builder ? Status::kInvalidValueType : Status::kOk;
+            Status status = builder ? Status::kBuildInProgress : Status::kOk;
 
             switch ( change.kind )
             {

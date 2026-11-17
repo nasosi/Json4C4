@@ -389,9 +389,9 @@ void TestEditsDuringBuild()
     meddler.target = &meddled;
 
     CheckStatus( data.AppendElement( root, meddler ), Json::Status::kOk, "append through a Serialize that edits" );
-    CheckStatus( meddler.edit, Json::Status::kInvalidValueType, "an edit during a build is refused" );
-    CheckStatus( meddler.build, Json::Status::kInvalidValueType, "a SerializeFrom during a build is refused" );
-    CheckStatus( meddler.parse, Json::Status::kInvalidValueType, "a parse during a build is refused" );
+    CheckStatus( meddler.edit, Json::Status::kBuildInProgress, "an edit during a build is refused" );
+    CheckStatus( meddler.build, Json::Status::kBuildInProgress, "a SerializeFrom during a build is refused" );
+    CheckStatus( meddler.parse, Json::Status::kBuildInProgress, "a parse during a build is refused" );
     Check( Holds( data, "[ 1, 3 ]" ), "the build goes on, and a Clear during it does nothing" );
 }
 

@@ -2,7 +2,7 @@
 
 int main()
 {
-    constexpr unsigned statusCount = unsigned( Json::Status::kStaleEditHandle ) + 1;
+    constexpr unsigned statusCount = unsigned( Json::Status::kBuildInProgress ) + 1;
 
     for ( unsigned a = 0; a < statusCount; a++ )
     {
@@ -28,6 +28,7 @@ int main()
     Check( strcmp( Json::StatusToString( Json::Status::kStringHoldsZero ), "String holds a zero character" ) == 0, "kStringHoldsZero string" );
     Check( strcmp( Json::StatusToString( Json::Status::kIndexOutOfRange ), "Array index out of range" ) == 0, "kIndexOutOfRange string" );
     Check( strcmp( Json::StatusToString( Json::Status::kStaleEditHandle ), "Edit handle taken before the document changed" ) == 0, "kStaleEditHandle string" );
+    Check( strcmp( Json::StatusToString( Json::Status::kBuildInProgress ), "Document is being built" ) == 0, "kBuildInProgress string" );
     Check( strcmp( Json::StatusToString( Json::Status( statusCount ) ), "Unknown status" ) == 0, "out of range status" );
     Check( strcmp( Json::StatusToString( Json::Status( 0xFFFFFFFF ) ), "Unknown status" ) == 0, "large out of range status" );
 
