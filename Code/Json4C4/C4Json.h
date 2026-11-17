@@ -660,7 +660,7 @@ namespace C4
             {
                 uint32 length = 0;
 
-                while ( text[ length ] != 0 )
+                while ( text && ( text[ length ] != 0 ) )
                 {
                     length++;
                 }
@@ -688,9 +688,10 @@ namespace C4
         };
 
         // A document. Everything it holds lives in blocks from its block source, which it hands back when it is
-        // cleared, parsed again or destroyed. Values, strings and views taken from it are valid until then, except
-        // that an edit moves the elements or members of the array or object it changes: pointers to them, and views
-        // and pointers into them, are not valid after it, while views of the edited value itself stay valid.
+        // cleared, parsed again, replaced by SerializeFrom or destroyed. Values, strings and views taken from it are
+        // valid until then, except that an edit moves the elements or members of the array or object it changes:
+        // pointers to them, and views and pointers into them, are not valid after it, while views of the edited value
+        // itself stay valid as long as it keeps its type.
         class StructuredData
         {
             friend class EditHandle;
@@ -721,7 +722,8 @@ namespace C4
             template <class T>
             Status DeserializeTo( T& data ) const noexcept;
 
-            // Replaces the document with the values data serializes to. A failure leaves the document empty.
+            // Replaces the document with the values data serializes to, which may be values of the document itself. A
+            // failure leaves the document empty.
             template <class T>
             Status SerializeFrom( const T& data ) noexcept;
 
@@ -795,6 +797,12 @@ namespace C4
             char* AllocateBytes( uint64 size ) noexcept;
             void* AllocateInNewBlock( uint64 size, bool aligned ) noexcept;
 
+            bool   Owns( const void* address ) const noexcept;
+            Block* TakeBlocks() noexcept;
+            void   FreeBlocks( Block* block ) noexcept;
+
+            ParseResult ClearAndParse( const char* text, uint64 length, const ParseOptions& options ) noexcept;
+
             template <class T>
             Status Build( const Change& change, const T& data ) noexcept;
 
@@ -832,14 +840,7 @@ namespace C4
 
             void AddName( const char* name, bool missing = false ) noexcept
             {
-                uint32 length = 0;
-
-                while ( name[ length ] != 0 )
-                {
-                    length++;
-                }
-
-                AddName( name, length, missing );
+                AddName( name ? name : "", Detail::GetTextLength( name ), missing );
             }
 
             void AddIndex( uint32 index ) noexcept
@@ -884,6 +885,16 @@ namespace C4
                 }
 
                 return false;
+            }
+
+            inline Status CheckStringCopy( const StringView& string ) noexcept
+            {
+                if ( string.GetLength() > 0x7FFFFFFFU )
+                {
+                    return Status::kMaximumStringByteCountExceeded;
+                }
+
+                return HoldsZero( string ) ? Status::kStringHoldsZero : Status::kOk;
             }
         } // namespace Detail
 
@@ -965,7 +976,8 @@ namespace C4
             return value.IsNull() ? Status::kOk : Status::kInvalidValueType;
         }
 
-        // A String<> ends at its first zero, so a string that holds one fails with kStringHoldsZero.
+        // A String<> holds less than 2 GiB and ends at its first zero, so a longer string fails with
+        // kMaximumStringByteCountExceeded and a string that holds a zero with kStringHoldsZero.
         TERATHON_API Status ValidateTraced( const Value& value, const String<>& data, ReadPath& path ) noexcept;
         TERATHON_API Status DeserializeTraced( const Value& value, String<>& data, ReadPath& path ) noexcept;
 
@@ -1156,7 +1168,9 @@ namespace C4
 
                     for ( const Member& member : object )
                     {
-                        Status status = Detail::HoldsZero( member.GetName() ) ? Status::kStringHoldsZero : ValidateValue( member.GetValue(), element, path );
+                        Status status = Detail::CheckStringCopy( member.GetName() );
+
+                        status = ( status == Status::kOk ) ? ValidateValue( member.GetValue(), element, path ) : status;
 
                         if ( status != Status::kOk )
                         {
@@ -1190,7 +1204,7 @@ namespace C4
                     {
                         const StringView& name          = member.GetName();
                         ElementType*      element       = nullptr;
-                        Status            elementStatus = Detail::HoldsZero( name ) ? Status::kStringHoldsZero : Status::kOk;
+                        Status            elementStatus = Detail::CheckStringCopy( name );
 
                         if ( elementStatus == Status::kOk )
                         {
@@ -1655,7 +1669,9 @@ namespace C4
 
         inline Status Serialize( Node node, const std::string& data ) noexcept
         {
-            return node.SetString( data.data(), uint32( data.size() ) );
+            uint32 length = uint32( data.size() );
+
+            return ( length == data.size() ) ? node.SetString( data.data(), length ) : Status::kMaximumStringByteCountExceeded;
         }
 
         template <class T>
@@ -1754,7 +1770,10 @@ namespace C4
             {
                 Node member;
 
-                status = ( status == Status::kOk ) ? node.AddMember( element.first.data(), uint32( element.first.size() ), member ) : status;
+                uint32 length = uint32( element.first.size() );
+
+                status = ( ( status == Status::kOk ) && ( length != element.first.size() ) ) ? Status::kMaximumStringByteCountExceeded : status;
+                status = ( status == Status::kOk ) ? node.AddMember( element.first.data(), length, member ) : status;
                 status = ( status == Status::kOk ) ? SerializeValue( member, element.second ) : status;
             }
 
