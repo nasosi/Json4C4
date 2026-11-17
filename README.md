@@ -209,7 +209,7 @@ A ```Serialize``` function must leave the document being built alone: an edit, a
 
 ## Versions
 ### Version 3.0.1
-* ```SerializeFrom``` may be given a value of the document itself, as in ```doc.SerializeFrom( *doc.GetRoot()->AsObject().Find( "keep" ) )```, ```ParseText``` a string of it, and ```Parse``` a file named by one. 3.0 read such a value from memory the document had already handed back. A ```SerializeFrom``` now holds the old document until the new one is built.
+* ```SerializeFrom``` may be given a value of the document itself, as in ```doc.SerializeFrom( *doc.GetRoot()->AsObject().Find( "keep" ) )```, and ```ParseText``` a string of it. 3.0 read such a value from memory the document had already handed back. A ```SerializeFrom``` now holds the old document until the new one is built.
 * A ```Serialize``` that goes on after an array failed to close, as when a block source refuses its memory, no longer crashes the build.
 * ```AddMember``` with a null name fails with ```Status::kNameNotPresent```, through an ```EditHandle``` or a ```Node```, instead of adding a member named ```""```, and ```AddMember``` and ```RemoveMember``` given a null name and no length no longer read through it.
 * ```Write``` fails with ```Status::kFileTooLarge``` on a string of 2 GiB or more instead of crashing, and serializing a ```std::string``` of 4 GiB or more fails with ```Status::kMaximumStringByteCountExceeded``` instead of keeping only part of it.
