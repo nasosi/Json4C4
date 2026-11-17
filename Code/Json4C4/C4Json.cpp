@@ -803,6 +803,16 @@ namespace C4
             return ( c == space ) || ( c == tab ) || ( c == newLine ) || ( c == carriageReturn );
         }
 
+        inline uint64 ReadEightBytes( const char* text ) noexcept
+        {
+            uint64 word;
+            memcpy( &word, text, 8 );
+
+            return word;
+        }
+
+        constexpr uint64 eightSpaces = 0x2020202020202020;
+
         inline bool IsDigit( uint32 c ) noexcept
         {
             return ( c - '0' ) < 10U;
@@ -983,6 +993,11 @@ namespace C4
                 while ( IsWhitespace( uint8( text[ 0 ] ) ) )
                 {
                     text++;
+
+                    while ( ( spaceStop - text >= 8 ) && ( ReadEightBytes( text ) == eightSpaces ) )
+                    {
+                        text += 8;
+                    }
                 }
 
                 return text;
