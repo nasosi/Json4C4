@@ -152,6 +152,7 @@ void TestMembers()
 
     CheckStatus( data.SerializeAt( root, map ), Json::Status::kOk, "serialize a map onto an object" );
     Check( Holds( data, "{ \"m\": 5 }" ), "only the map's members are left" );
+    Check( object.FindNumber( "m" ) && ( *object.FindNumber( "m" ) == 5 ), "a view of an object replaced by an object stays valid" );
 
     CheckStatus( data.SerializeAt( root, Json::ObjectMap<double>() ), Json::Status::kOk, "serialize an empty map onto an object" );
     Check( Holds( data, "{}" ), "an empty map empties the object" );
