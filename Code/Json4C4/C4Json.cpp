@@ -660,24 +660,24 @@ namespace C4
             }
         }
 
-        Status AppendText( Array<char>& output, const char* text, int32 length )
+        Status AppendText( Array<char>& output, const char* text, uint32 length )
         {
             int32 count = output.GetArrayElementCount();
 
-            if ( length > JSON4C4_MAX_FILE_SIZE - count )
+            if ( uint64( count ) + length > JSON4C4_MAX_FILE_SIZE )
             {
                 return Status::kFileTooLarge;
             }
 
-            output.SetArrayElementCount( count + length );
-            CopyText( output.begin() + count, text, length );
+            output.SetArrayElementCount( count + int32( length ) );
+            CopyText( output.begin() + count, text, int32( length ) );
 
             return Status::kOk;
         }
 
         Status AppendText( Array<char>& output, const char* text )
         {
-            return AppendText( output, text, Text::GetTextLength( text ) );
+            return AppendText( output, text, uint32( Text::GetTextLength( text ) ) );
         }
 
         // The length of the character at byte when a string literal holds it unescaped, or 0 when it has to be escaped or is
@@ -739,7 +739,7 @@ namespace C4
                     byte += charLength;
                 }
 
-                status = AppendText( output, reinterpret_cast<const char*>( run ), int32( byte - run ) );
+                status = AppendText( output, reinterpret_cast<const char*>( run ), uint32( byte - run ) );
 
                 if ( ( status != Status::kOk ) || ( byte == end ) )
                 {
