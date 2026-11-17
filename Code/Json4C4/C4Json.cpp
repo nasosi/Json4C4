@@ -1748,11 +1748,31 @@ namespace C4
 
             bool Reserve( uint64 extra ) noexcept
             {
-                if ( capacity - size >= extra )
+                return ( capacity - size >= extra ) || Grow( extra );
+            }
+
+            template <class T>
+            bool Push( const T& item ) noexcept
+            {
+                if ( !Reserve( sizeof( T ) ) )
                 {
-                    return true;
+                    return false;
                 }
 
+                *reinterpret_cast<T*>( base + size ) = item;
+                size += sizeof( T );
+
+                return true;
+            }
+
+        private:
+            BlockSource& blockSource;
+            char*        base     = nullptr;
+            uint64       capacity = 0;
+            uint64       size     = 0;
+
+            bool Grow( uint64 extra ) noexcept
+            {
                 uint64 needed = RoundUpToEight( size + extra );
                 uint64 grown  = ( capacity != 0 ) ? capacity * 2 : smallestStackSize;
 
@@ -1785,26 +1805,6 @@ namespace C4
 
                 return true;
             }
-
-            template <class T>
-            bool Push( const T& item ) noexcept
-            {
-                if ( !Reserve( sizeof( T ) ) )
-                {
-                    return false;
-                }
-
-                *reinterpret_cast<T*>( base + size ) = item;
-                size += sizeof( T );
-
-                return true;
-            }
-
-        private:
-            BlockSource& blockSource;
-            char*        base     = nullptr;
-            uint64       capacity = 0;
-            uint64       size     = 0;
         };
 
         struct PendingMember
