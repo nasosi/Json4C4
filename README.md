@@ -78,7 +78,7 @@ if ( jsonStructuredData.DeserializeTo( textBox ) != Json::Status::kOk )
 printf( "TextBox text: %s. Width: %f, height: %f\n",
         static_cast< const char* >( textBox.text ), textBox.width, textBox.height );
 ```
-If the ```Deserialize``` call is not  successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
+If the ```DeserializeTo``` call is not successful, the ```textBox``` object is in an undefined state. If, in your code, an undefined state is not handled, then you likely need to validate the structured data before deserializing. ```Example02_non_trivial_data_structure``` shows how to achieve this, along with demonstrating additional features of the Json4C4 library.
 
 ### Reading in one call
 ```Json::Read``` parses a file, or a text in memory, and deserializes it in one call. When it fails, the ```Json::ReadResult``` it returns tells where: a syntax error gives its line and column, and a value that does not fit the structure gives its path, such as ```boxes[2].width```, and its line and column. A member that is missing gives the line and column of the object that should hold it.
@@ -149,12 +149,12 @@ for ( const Json::Member& member : box )
 * An ```ArrayView``` gives its elements with ```[ index ]``` and in a range-based ```for```, and ```GetElementCount()``` counts them.
 * A ```StringView``` is a pointer and a length, without a terminating zero. A string may hold zeros, written ```\u0000``` in JSON. A ```std::string``` keeps them, while a ```String<>```, or a name in an ```ObjectMap```, cannot hold them, and validating or deserializing one fails with ```Status::kStringHoldsZero```.
 
-A document keeps everything it holds in a few large blocks, which it takes from a ```Json::BlockSource``` and hands back when it is cleared with ```Clear()```, parsed again or destroyed. Values, strings and views taken from a document are valid until then, and finding or iterating allocates nothing. A value takes 16 bytes and an object member 32, so a document of small numbers, such as ```[1,1,1]```, takes about 8 times the size of its text.
+A document keeps everything it holds in a few large blocks, which it takes from a ```Json::BlockSource``` and hands back when it is cleared with ```Clear()```, parsed again, replaced by ```SerializeFrom``` or destroyed. Values, strings and views taken from a document are valid until then, and finding or iterating allocates nothing. A value takes 16 bytes and an object member 32, so the values of a long array of small numbers, such as ```[1,1,1,...]```, take 8 times the size of its text, and the document takes about 10 times.
 
-The default block source uses ```operator new```. A source of your own is given to the constructor and must outlive the document. It may refuse a block by returning ```nullptr```, and the parse or edit then fails with ```Status::kAllocationRefused```: a parse leaves the document empty, and an edit leaves it as it was.
+The default block source uses ```operator new```. A source of your own is given to the constructor and must outlive the document. It may refuse a block by returning ```nullptr```. A block the document only wanted for growth is then asked for again at smaller sizes, and when a block it needs is refused, the parse or edit fails with ```Status::kAllocationRefused```: a parse leaves the document empty, and an edit leaves it as it was.
 
 ## Writing, serializing and editing
-```Write``` writes a whole document into a file or an ```Array<char>```, indented by two spaces unless told otherwise:
+```Write``` writes a whole document into a file, or at the end of an ```Array<char>```, indented by two spaces unless told otherwise:
 ```cxx
 jsonStructuredData.Write( "Data/Examples/simpleRewrite.json" );
 jsonStructuredData.Write( "Data/Examples/simpleTabs.json", 1, '\t' );
@@ -175,7 +175,7 @@ A document can also be edited in place. An edit is given a ```Json::EditHandle``
 * ```RemoveElement( handle, index )``` and ```RemoveMember( handle, name )``` remove an element or a member, and fail with ```Status::kIndexOutOfRange``` or ```Status::kNameNotPresent``` when there is none.
 * ```EmptyObject( handle )``` removes every member of an object.
 
-The ```data``` of an edit is anything that serializes: a number, a ```bool```, a string, an array, a structure with process rules, ```Json::Null```, or a ```Json::Value``` of this document or another, which is copied.
+The ```data``` of an edit is anything that serializes: a ```double```, a ```float```, a ```bool```, a string, an array, a structure with process rules, ```Json::Null```, or a ```Json::Value``` of this document or another, which is copied.
 ```cxx
 const Json::Value& root   = *jsonStructuredData.GetRoot();
 Json::EditHandle   object = jsonStructuredData.Edit( root );
@@ -233,7 +233,7 @@ A ```Validate``` or ```Deserialize``` function of your own that takes a ```const
 * An optional member that is present must be valid as a whole. 2.x ignored a member missing inside it, so it could succeed and leave an optional array empty.
 * Strings may hold ```\u0000```, which 2.x refused with ```Status::kStringIllegalEscape```. Validating or deserializing such a string into a ```String<>``` fails with ```Status::kStringHoldsZero```.
 * ```SerializeFrom``` fails on a NaN or an infinity, which 2.x refused only when writing, and a failed ```SerializeFrom``` leaves the document empty.
-* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange```, ```kStaleEditHandle``` and ```kBuildInProgress``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces.
+* ```kAllocationRefused```, ```kStringHoldsZero```, ```kIndexOutOfRange```, ```kStaleEditHandle``` and ```kBuildInProgress``` are new statuses, and the unused ```kMissingObjectElement``` is gone, so the statuses after it are numbered one lower. Two status strings now say square brackets instead of square braces, and one spells beginning correctly.
 
 ### Version 2.3
 * ```ParseText``` reads a text in memory from a pointer and a length, without a terminating zero and without copying it.
