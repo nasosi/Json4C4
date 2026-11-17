@@ -59,6 +59,7 @@ message( STATUS "Json4C4: version: " ${Json4C4Version} )
 option(Json4C4EnableStdSupport "Enable std::string and std::vector support" Yes)
 option(Json4C4DisableExceptions "Disable Exceptions" No)
 option(Json4C4EnableSanitizers "Build with the address and undefined behavior sanitizers" No)
+option(Json4C4BuildFuzzer "Build the fuzzer, with libFuzzer under clang and otherwise as a program that runs the files it is given" No)
 
 if ( ${Json4C4EnableSanitizers} )
 
@@ -74,6 +75,14 @@ if ( ${Json4C4EnableSanitizers} )
     endif()
 
     message( STATUS "Json4C4: sanitizers enabled")
+
+endif()
+
+if ( ${Json4C4BuildFuzzer} AND ( CMAKE_CXX_COMPILER_ID STREQUAL "Clang" ) )
+
+    add_compile_options( -fsanitize=fuzzer-no-link )
+
+    message( STATUS "Json4C4: fuzzer instrumentation enabled")
 
 endif()
 
@@ -224,5 +233,9 @@ if ( Json4C4NotSubProject )
     
     enable_testing()   
     add_subdirectory( Code/Tests )
+
+    if ( ${Json4C4BuildFuzzer} )
+        add_subdirectory( Code/Fuzz )
+    endif()
 
 endif( Json4C4NotSubProject )

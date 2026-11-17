@@ -102,6 +102,39 @@ jobs:
         UBSAN_OPTIONS: print_stacktrace=1
       run: ctest --output-on-failure
 
+  fuzz:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ github.workspace }}/build
+        -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER=clang
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        -DJson4C4EnableSanitizers=Yes
+        -DJson4C4BuildFuzzer=Yes
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ github.workspace }}/build --target Json4C4FuzzParse
+
+    - name: Fuzz for a minute from the test files
+      env:
+        UBSAN_OPTIONS: print_stacktrace=1
+      run: |
+        mkdir -p corpus crashes
+        build/bin/Json4C4FuzzParse -max_total_time=60 -artifact_prefix=crashes/ corpus Data/Test Data/Test/jsonchecker Data/Examples
+
+    - name: Upload the crashing input
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-crash
+        path: crashes/
+
   no-system:
     runs-on: windows-latest
 
