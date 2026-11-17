@@ -213,6 +213,7 @@ A ```Serialize``` function must leave the document being built alone: an edit, a
 * A ```Serialize``` that goes on after an array failed to close, as when a block source refuses its memory, no longer crashes the build.
 * ```AddMember``` with a null name fails with ```Status::kNameNotPresent```, through an ```EditHandle``` or a ```Node```, instead of adding a member named ```""```, and ```AddMember``` and ```RemoveMember``` given a null name and no length no longer read through it.
 * ```Write``` fails with ```Status::kFileTooLarge``` on a string of 2 GiB or more instead of crashing, and serializing a ```std::string``` of 4 GiB or more fails with ```Status::kMaximumStringByteCountExceeded``` instead of keeping only part of it.
+* Writing with gcc is about as fast as in 2.3 again. 3.0 wrote up to 1.76 times slower with gcc, which copied the growing output one byte at a time and read the last characters of each string through a call to ```memcpy```.
 * A view of a value that ```SerializeAt``` replaces stays valid only when the new value has the same type. 3.0 promised it in every case, but a view of an array or object replaced by a value of another type reads what is no longer there.
 
 ### Version 3.0
