@@ -1663,7 +1663,9 @@ namespace C4
 
         inline Status Serialize( Node node, const std::string& data ) noexcept
         {
-            return node.SetString( data.data(), uint32( data.size() ) );
+            uint32 length = uint32( data.size() );
+
+            return ( length == data.size() ) ? node.SetString( data.data(), length ) : Status::kMaximumStringByteCountExceeded;
         }
 
         template <class T>
